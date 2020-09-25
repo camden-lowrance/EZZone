@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="stylesheet" href="static/css/hopscotch.css"></link>
+    <style type="text/css">
+    #map {
+      width: 750px;
+      height: 500px;
+      border: 1px solid #ccc;
+    }
+    .olControlScale {
+      bottom: 0em !important;
+    }
+	.olControlNavToolbar div {
+		display:block;
+		width:  28px;
+		height: 28px;
+		top: 300px;
+		left: 6px;
+		position: relative;
+	}            
+	
+	.olControlEditingToolbar .olControlDeleteItemActive {
+		background-image: url("static/theme/default/img/remove_point_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDeleteItemInactive {
+		background-image: url("static/theme/default/img/remove_point_off.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPointItemActive {
+		background-image: url("static/theme/default/img/add_point_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPointItemInactive {
+		background-image: url("static/theme/default/img/add_point_off.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlLineItemActive {
+		background-image: url("static/theme/default/img/draw_line_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlLineItemInactive {
+		background-image: url("static/theme/default/img/draw_line_off.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPanItemActive {
+		background-image: url("static/theme/default/img/pan_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPanItemInactive {
+		background-image: url("static/theme/default/img/pan_off.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlModifyItemActive {
+		background-image: url("static/theme/default/img/move_feature_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlModifyItemInactive {
+		background-image: url("static/theme/default/img/move_feature_off.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDragItemActive {
+		background-image: url("static/theme/default/img/draw_polygon_on.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDragItemInactive {
+		background-image: url("static/theme/default/img/draw_polygon_off.png");
+		background-repeat: no-repeat;
+	}
+	</style>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <script type="text/javascript" src="static/OpenLayers.js"></script>
+	<script type="text/javascript"> 
+		var $SCRIPT_ROOT = {{ request.script_root|tojson|safe }};  
+	</script> 
+	<script type="text/javascript" src="http://maps.googleapis.com/maps/api/js?v=3&sensor=true"></script>
+	 <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+    <script type="text/javascript">
+		var map, vectors, fc, panel, geojson, json, form;
+		var lon = 22
+		var lat = 38
+		var zoom = 15
+        function init(){
+            map = new OpenLayers.Map('map', {
+				projection: 'EPSG:3857',
+				layers: [
+					new OpenLayers.Layer.Google(
+						"Google Satellite",
+						{type: google.maps.MapTypeId.SATELLITE, numZoomLevels: 22}
+					)
+					
+				],
+				});
+            
+			fc = {{string|tojson}}		
+			geojson = new OpenLayers.Format.GeoJSON();
+            /*var renderer = OpenLayers.Util.getParameters(window.location.href).renderer;
+            renderer = (renderer) ? [renderer] : OpenLayers.Layer.Vector.prototype.renderers;
+			*/
+            vectors = new OpenLayers.Layer.Vector("Vector Layer", {
+                eventListeners: {
+					featurehighlighted: function (event) {
+					console.log(event);
+					console.log(event.feature);
+					}
+				}
+			});
+            map.addLayer(vectors);
+            vectors.addFeatures(geojson.read(fc));
+			map.zoomToExtent(vectors.getDataExtent());
+			map.addControl(new OpenLayers.Control.LayerSwitcher());
+            map.addControl(new OpenLayers.Control.MousePosition());
+						
+			var addPointControl = new OpenLayers.Control.DrawFeature(vectors, OpenLayers.Handler.Point , {
+					clickout: false,
+                    toggle: true,
+                    title: "Point",
+                    displayClass: "olControlPoint"
+					
+                })
+			var deleteFeatureControl = new OpenLayers.Control.SelectFeature(vectors, {
+                    clickout: false,
+                    toggle: false,
+                    title: "Delete",
+                    displayClass: "olControlDelete",
+					eventListeners: {
+					featurehighlighted: function (event) {
+						
+						console.log(event.feature);
+					}
+				}
+                });
+			
+			var addLineControl = new OpenLayers.Control.DrawFeature(vectors, OpenLayers.Handler.Path, {
+					clickout: false,
+                    toggle: true,
+                    title: "Line",
+                    displayClass: "olControlLine"
+                });
+				
+			var panMapControl = new OpenLayers.Control.PanPanel({
+					clickout: true,
+                    toggle: true,
+                    title: "Pan",
+                    displayClass: "olControlPan"})
+					
+			var modifyFeatureControl = new OpenLayers.Control.ModifyFeature(vectors, {
+                    clickout: false,
+                    toggle: false,
+                    title: "Modify",
+                    displayClass: "olControlModify"
+                });
+				
+			var dragFeatureControl = new OpenLayers.Control.DragFeature(vectors, {
+                    clickout: false,
+                    toggle: false,
+                    title: "Drag",
+                    displayClass: "olControlDrag"
+                });
+							
+			deleteFeatureControl.events.register("featurehighlighted", this, function(e) {
+                    if (confirm('Are you sure you want to delete this feature?')) {
+                        vectors.removeFeatures([e.feature]);
+                        deleteFeatureControl.deactivate();
+                    } else {
+                        deleteFeatureControl.unselect(e.feature);
+                    }
+                });
+            
+			
+			panel = new OpenLayers.Control.Panel({
+                    displayClass: 'olControlEditingToolbar'
+                });
+                
+            panel.addControls([panMapControl,deleteFeatureControl,addPointControl,addLineControl,modifyFeatureControl,dragFeatureControl]);
+            map.addControls([panel]);
+            
+            
+			
+
+        }
+		
+        
+    
+	
+		function getJSON(){
+			for (i = 0; i < panel.controls.length; i ++) {
+				panel.controls[i].deactivate()
+				}
+			json = geojson.write(vectors.features);
+			var formInfo = document.forms['send'];
+			formInfo.jsonval.value = json;
+			
+		}
+		
+    </script>
+  </head>
+  <body onload="init()">
+    <h1 id="title">GeoJSON Example</h1>
+    <div id="map" class="smallmap"></div>
+	<div id="form">
+      
+      <form id="send" method="post" action="create" onsubmit="getJSON()" enctype='application/json'>        
+        <input type="submit" value="Continue" />
+		<input type="hidden" name="jsonval" value=""/>
+      </form>
+    </div>
+    </body>
+</html>

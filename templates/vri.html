@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+  <head>
+	<link href="//netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css"
+          rel="stylesheet">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <script type="text/javascript" src="static/OpenLayers.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyATYVOOp1Il3G52U4sx0pfoC4_dZ90a8wE"></script>
+    <link rel="stylesheet" type="text/css" href="static/css/tooltipster.css" />
+	<link rel="stylesheet" type="text/css" href="static/css/tooltipster-shadow.css" />
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+	<script type="text/javascript" src="static/js/jquery.tooltipster.min.js">	</script>
+	<style type="text/css">
+	.page-header {
+		margin-top: 10px;
+		margin-bottom: 10px;
+		border-bottom: 0px;
+		}
+	#logo {
+		-webkit-border-image: -webkit-linear-gradient(left,#e00203,#0870ae) 0 0 100% 0/0 0 5px 0 stretch;
+		max-height:50px !important;
+
+		}
+	h4{
+		margin-top:5px;
+		margin-bottom:15px; !important
+	}
+	h3{
+		margin-top:0px;
+		margin-bottom:15px;
+	}
+	h2{
+		margin-top: 0px;
+	}
+	.col-sm-3{
+		margin-top: 5px;
+		border-radius: 15px;
+		box-shadow: 6px 6px 3px 3px lightGrey;
+		border-top: 2px solid lightGrey;
+		border-left: 2px solid lightGrey;
+		padding: 20px;
+	}
+	.col-sm-9 {
+		margin-left: 0px;
+		padding-left: 0px;
+		border-left:0px;
+	}
+	.col-xs-2 {
+		margin: 0px;
+		padding: 0px;
+		border: 0;
+	}
+	#buttons {
+		max-width: 180px;
+		margin-left: auto;
+		margin-right: auto;
+		padding: 0px;
+	}
+	.small_image {
+		border: 1px solid grey;
+		min-height:24px;
+
+		}
+    #map {
+	  border-radius:15px
+	  overflow: hidden;
+	  position : left;
+      width: 100%;
+      height: 500px;
+      border: 1px solid #ccc;
+    }
+    .olControlScale {
+      bottom: 0em !important;
+    }
+	.olControlNavToolbar div {
+		display:block;
+		width:  26px;
+		height: 26px;
+		top: 250px;
+		left: 6px;
+		position: relative;
+	}
+
+	.olControlEditingToolbar .olControlDeleteItemActive {
+		background-image: url("static/img/delete_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDeleteItemInactive {
+		background-image: url("static/img/delete.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPointItemActive {
+		background-image: url("static/img/point_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPointItemInactive {
+		background-image: url("static/img/point.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlLineItemActive {
+		background-image: url("static/img/drawline_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlLineItemInactive {
+		background-image: url("static/img/drawline.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPanItemActive {
+		background-image: url("static/img/pan_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlPanItemInactive {
+		background-image: url("static/img/pan.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlModifyItemActive {
+		background-image: url("static/img/modify_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlModifyItemInactive {
+		background-image: url("static/img/modify.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDragItemActive {
+		background-image: url("static/img/move_sel.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .olControlDragItemInactive {
+		background-image: url("static/img/move.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .ButtonItemInactive{
+		background-image: url("static/img/check_new.png");
+		background-repeat: no-repeat;
+	}
+	.olControlEditingToolbar .ButtonItemActive{
+		background-image: url("static/img/check_new_sel.png");
+		background-repeat: no-repeat;
+	}
+	</style>
+
+    <script type="text/javascript">
+		var map, vectors, fc, panel, geojson, json, form;
+        function init(){
+            map = new OpenLayers.Map('map', {
+				projection: 'EPSG:3857',
+				layers: [
+					new OpenLayers.Layer.Google(
+						"Google Satellite",
+						{type: google.maps.MapTypeId.SATELLITE, numZoomLevels: 22}
+					)
+
+				],
+				});
+
+
+
+			fc = {{string|tojson|safe}};
+			geojson = new OpenLayers.Format.GeoJSON();
+			//https://gis.stackexchange.com/questions/46782/openlayers-vertex-style-in-control-modifyfeature
+			var defaultStyle = new OpenLayers.Style({
+				'strokeWidth': 4,
+				'fillColor' : 'orange',
+				'fillOpacity' : .4,
+				'strokeColor' :'orange',
+				'pointRadius' : 3
+			})
+
+			var selectStyle = new OpenLayers.Style({
+				'strokeWidth': 1,
+				'fillColor' : 'blue',
+				'fillOpacity' : .4,
+				'strokeColor' :'blue',
+				'pointRadius' : 1
+			})
+
+			var vertexStyle = new OpenLayers.Style({
+				'strokeWidth': 1,
+				'fillColor' : 'orange',
+				'fillOpacity' : .6,
+				'strokeColor' :'orange',
+				'pointRadius' : 5
+			})
+
+
+
+			var styleMap = new OpenLayers.StyleMap({
+									'default' : defaultStyle,
+									'select'  : selectStyle,
+									'vertex'  : vertexStyle
+									});
+            vectors = new OpenLayers.Layer.Vector("Vector Layer"
+												,{styleMap: styleMap}
+												);
+            map.addLayer(vectors);
+            vectors.addFeatures(geojson.read(fc));
+			map.zoomToExtent(vectors.getDataExtent());
+
+			var addPointControl = new OpenLayers.Control.DrawFeature(vectors, OpenLayers.Handler.Point , {
+					clickout: false,
+                    toggle: true,
+                    title: "Draw a Point",
+                    displayClass: "olControlPoint"
+
+                })
+			var deleteFeatureControl = new OpenLayers.Control.SelectFeature(vectors, {
+                    clickout: true,
+                    toggle: true,
+                    title: "Delete a Feature",
+                    displayClass: "olControlDelete",
+					eventListeners: {
+					featurehighlighted: function (event) {
+
+						console.log(event.feature);
+					}
+				}
+                });
+
+			var addLineControl = new OpenLayers.Control.DrawFeature(vectors, OpenLayers.Handler.Path, {
+					callbacks : {
+					"point" : function(pointGeometry, lineGeometry) {
+						var numPoints = lineGeometry.getVertices().length;
+						console.log(numPoints);
+						if (numPoints == 3) {
+							this.drawFeature(lineGeometry);
+							this.deactivate();
+							}
+						}
+					},
+					clickout: false,
+                    toggle: true,
+                    title: "Draw a Line",
+                    displayClass: "olControlLine"
+                });
+
+			var panMapControl = new OpenLayers.Control.PanPanel({
+					clickout: true,
+                    toggle: true,
+                    title: "Pan the map",
+                    displayClass: "olControlPan"})
+
+			var modifyFeatureControl = new OpenLayers.Control.ModifyFeature(vectors, {
+                    clickout: true,
+                    toggle: true,
+					createVertices: true,
+                    title: "Modify a Feature",
+                    displayClass: "olControlModify",
+					vertexRenderIntent : 'vertex'
+                });
+
+			var dragFeatureControl = new OpenLayers.Control.DragFeature(vectors, {
+                    clickout: false,
+                    toggle: false,
+                    title: "Drag a Feature",
+                    displayClass: "olControlDrag"
+                });
+
+			var button = new OpenLayers.Control.Button({
+				displayClass: "Button",
+				title: "Continue",
+				trigger: getJSON
+				});
+
+			deleteFeatureControl.events.register("featurehighlighted", this, function(e) {
+                    if (confirm('Are you sure you want to delete this feature?')) {
+                        vectors.removeFeatures([e.feature]);
+                        deleteFeatureControl.deactivate();
+                    } else {
+                        deleteFeatureControl.unselect(e.feature);
+                    }
+                });
+
+
+			panel = new OpenLayers.Control.Panel({
+                    displayClass: 'olControlEditingToolbar'
+                });
+
+            panel.addControls([button,deleteFeatureControl,dragFeatureControl,addPointControl,modifyFeatureControl,panMapControl]);
+            map.addControls([panel]);
+
+
+
+
+
+
+        }
+
+
+
+
+		function getJSON(){
+			for (i = 0; i < panel.controls.length; i ++) {
+				panel.controls[i].deactivate()
+				}
+			if (vectors.features.length < 2) {
+				alert("You forgot to add a point!");
+				return false;
+				}
+			else if (vectors.features.length > 2){
+				alert("You have too many points, please place only one!");
+				return false;
+				}
+			else {
+				json = geojson.write(vectors.features);
+				var formInfo = document.forms['send'];
+				formInfo.jsonval.value = json;
+				formInfo.submit();
+				}
+
+		}
+
+		$(document).ready(function() {
+            $('#pan').tooltipster({
+			content: $('<span>This tool pans the map, you can also use the zoom arrows in the top right to adjust the map view.</span>')
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+
+			$('#modify').tooltipster({
+			content: $("<span>This tool allows you to modify the vertices (points) of a feature and also create new vertices. To modify a vertex, click and drag to a new location.  To create a new vertex, click on the ghost vertex and drag it to the desired location.  To delete a vertex, hover over a vertex with your mouse and press 'Delete' on the keyboard.</span>")
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+
+			$('#point').tooltipster({
+			content: $("<span>This tool draws a point on the map, the point should indicate the center of the pivot.  This is required to continue. </span>")
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+
+			$('#move').tooltipster({
+			content: $("<span>This tool drags a feature on the map to a new location</span>")
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+
+			$('#delete').tooltipster({
+			content: $("<span>This tool deletes a feature on the map.  Be careful because the features can't be recovered unless you reload the page and start over.</span>")
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+
+			$('#continue').tooltipster({
+			content: $("<span>Click this to continue to the next step.</span>")
+			,maxWidth: 200,
+			theme: 'tooltipster-shadow',
+			position: 'bottom'
+			});
+        });
+    </script>
+  </head>
+  <body onload="init()">
+  <div class="container">
+      <header class="page-header">
+        <img id="logo" src="static/img/logonew.png" class="img-responsive img-left">
+      </header>
+	<div id ="left" class="col-sm-9">
+    <div id="map" class="smallmap"></div>
+	<br>
+	<div id="form">
+
+      <form id="send" method="post" action="createVri" onsubmit="return getJSON();" enctype='application/json'>
+		<input type="hidden" name="jsonval" value=""/>
+      </form>
+    </div>
+	</div>
+	<div id = "right" class="col-sm-3">
+	<h3 class="text-primary text-center"> Field Dimensions Adjustment</h3>
+	  <h4>Use the toolbar at the top right of the map to adjust the parameters of your field.  Click on a tool below to learn more about it.  </h4>
+	  <ul id="buttons" class="list-group row">
+	    <li id="pan" class="list-group-item col-xs-2">
+	    <img src="static/img/pan.png" class="small_image" >
+		</li>
+
+		<li id="modify" class="list-group-item col-xs-2">
+	    <img src="static/img/modify.png" class="small_image" >
+		</li>
+
+		<li id="point" class="list-group-item col-xs-2">
+	    <img src="static/img/point.png" class="small_image">
+		</li>
+
+		<li id="move" class="list-group-item col-xs-2">
+	    <img src="static/img/move.png"	class="small_image" >
+		</li>
+	    <li id="delete" class="list-group-item col-xs-2">
+	    <img src="static/img/delete.png" class="small_image" >
+		</li>
+
+		<li id="continue" class="list-group-item col-xs-2">
+	    <img src="static/img/check_new.png"	class="small_image">
+		</li>
+	</ul>
+	</div>
+	</div>
+    </body>
+</html>

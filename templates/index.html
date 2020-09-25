@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <link href="//netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css"
+          rel="stylesheet">
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+	<script src="static/js/bootstrap.file-input.js"></script>
+	<style type="text/css">
+	#left { 
+		width: 40%; 
+		border-right: 2px solid; 
+		border-color:#E0E0EB;
+		float: left;
+		padding-right: 15px;
+		}
+	#right { 
+		width: 60%;
+		padding-left: 15px; 
+		float: right
+		}
+	
+	#hr {
+		color:#E0E0EB;
+		background-color:#E0E0EB;
+		height:3px;		
+		}
+	#hrsmall {
+		color:#E0E0EB;
+		background-color:#E0E0EB;
+		height:1px;		
+		}
+	
+	#smoothSlider.slider-selection {
+		background: #BABABA;
+		}
+	
+	</style> 
+	<script type="text/javascript">
+
+function Display(i) {
+		row = document.getElementById("row");
+		vri = document.getElementById("vri");
+        if(i==2){
+            row.style.display="none";
+			vri.style.display="block";
+        }
+		else {
+            row.style.display="block";
+			vri.style.display="none";
+			
+        }
+}
+
+$(document).ready(function() {
+    // Hide on start
+    $("#filedis").hide();
+    $("#epsg").hide();
+	$("#fieldtype").hide();
+    // Handle mouse over for image
+    $("#fileclick").click(function() {
+		// This one is when the mouse enters
+		$("#filedis").show(); 
+		$("#about").hide();
+		$("#epsg").hide();
+		$("#fieldtype").hide();
+	});
+	$("#epsgclick").click(function() {
+		$("#epsg").show(); 
+		$("#about").hide();
+		$("#filedis").hide();
+		$("#fieldtype").hide();
+		});
+	$("#fieldclick").click(function() {
+		$("#fieldtype").show(); 
+		$("#about").hide();
+		$("#filedis").hide();
+		$("#epsg").hide();
+	});
+    
+});
+	function showValue(newValue)
+		{
+		document.getElementById("range").innerHTML=newValue;
+		}
+	
+	
+
+	</script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <img src="static/img/logo.png" style="margin-top: 10px">
+      </div>
+	
+      <hr id="hr">
+      <div id="left">
+      
+      <form action="upload" method="post" enctype="multipart/form-data">
+		
+        <h4 >Select a file or click 'Continue' to see example:
+		<a id="fileclick"><img src="static/img/qmark.ico" height = 8px style="margin-bottom:10px; margin-left:-5px"></a></h4>		
+		<input type="file" name="file" title="Browse for files" data-filename-placement="inside">
+		<br><br>
+		
+		<h4>Coordinate Reference System in EPSG:
+		<a id="epsgclick"><img src="static/img/qmark.ico" height = 8px style="margin-bottom:10px; margin-left:-5px"></a></h4>
+		<input type="text" name="coord" value="4326">
+		<br><br>
+		
+		<h4>Field Type: 
+		<a id="fieldclick"><img src="static/img/qmark.ico" height = 8px style="margin-bottom:10px; margin-left:-5px"></a></h4>
+		<input type= "radio" name="field" value="1" 
+		onClick="Display(1)"> Rectangular <br>
+		<input type= "radio" name="field" value="2"
+		onClick="Display(2)"> Center Pivot with Variable Rate Irrigation<br>
+		<input type= "radio" name="field" value="3" checked
+		onClick="Display(1)"> All other field types<br> <br>
+		
+		<h4>Number of Zones: </h4>
+		<select name="classes">
+		<option value=2 checked >Two </option>
+		<option value=3 >Three </option>
+		<option value=4 >Four </option>
+		<option value=5 >Five </option>
+		<option value=6 >Six </option>
+		<option value=7 >Seven </option>
+		<option value=8 >Eight </option>
+		<option value=9 >Nine </option>
+		</select>
+		<br>
+		<br>
+		<div id="row">
+		<h4>Row Spacing in Meters: </h4><input type="text" name="row" value="1">		
+		<br>
+		<br>
+		<h4>Smoothing Factor: </h4><input name ="smooth" type="range" min="1" max="10" value="1" step="1" onchange="showValue(this.value)" />
+		<span id="range" style='font-size: 18pt; font-style:bold; padding-left: 10px; padding-bottom: 2px'>1</span>
+		
+		</div>
+				
+		<div id="vri" style="display:none">
+		<h4>Spacing of Span in Meters: </h4><input type="text" name="spacing" value="25">
+		<br>
+		<h4>Length of Pivot in Meters: </h4><input type="text" name="length" value="800">
+		</div>
+		<br>
+        <input type="submit" value="Continue">
+      </form>
+      </div>
+	  <div id="right">
+	  <div id="about">
+	  <h3 class="text-primary"> About This Project</h3>
+	  <p>This is a free online resource for creating Agricultural Management Zones from univariate georeferenced data.  The goal is to create zones 
+	  that are useful to farmers by simplifying zone creation and creating zones that conform to row spacing and equipment specifications.
+	  </p>
+	  </div>
+	  <div id="filedis">
+	  <h3 > Input Data Preparation: </h4>
+	  <p> The data uploaded should be a .txt file of .csv file that is comma-delimited, this means that commas are used to separate columns.  The file should
+	  have three columns this order:
+	  </p>
+	  <p class= "text-center">
+	  <strong>		Longitude, Latitude, Value to zone</strong>
+	  </p>
+	  <br>
+	  <p> The names of the columns do not matter, here is an example text file in the correct format:
+	  </p>
+	  <img src="static/img/text_file_ex.png" class="img-responsive center-block">
+	  </div>
+	  <div id="epsg">
+	  <h3 > Coordinate Reference System: </h4>
+	  <p> EPSG codes are used to define Coordinate Reference Systems so that we can display data on maps of the Earth's surface. 
+	  If you haven't done any GIS manipulation of your data set, then the default value will most likely work for your data set. 
+	  Otherwise you will need to know the EPSG code for your data to continue.</p>
+	  </div>
+	  <div id="fieldtype">
+	  <h3 > Field Type </h3>
+	  <br>
+	  <div id="rect">
+	  <p>
+	  If your field is a well defined rectangle then choose <i> Rectangular</i>.
+	  </p>
+	  </div>
+	  
+	  <div id="vri">
+	  <p>
+	  If your field has <a href="http://www.nespal.org/vri.html">Variable Rate Irrigation</a> and you want to make zones for your pivot then choose <i> Center Pivot with Variable Rate Irrigation </i>
+	  </p>
+	  </div>
+	  
+	  <div id="irreg">
+	  <p>
+	  If you have any other field type then choose <i>All other field types </i>
+	  </p>
+	  </div>
+	  </div>
+	  </div>
+	  
+	  
+    </div>
+	<script type="text/javascript">
+	$('input[type=file]').bootstrapFileInput();
+	$('.file-inputs').bootstrapFileInput();
+	</script>
+  </body>
+</html>

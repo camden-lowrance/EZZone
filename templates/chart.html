@@ -1,0 +1,191 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+	<link href="//netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css"
+          rel="stylesheet">
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <style type="text/css">
+	.page-header {
+		margin-top: 10px;
+		margin-bottom: 10px;
+		border-bottom: 0px;
+		}
+	#logo {
+		-webkit-border-image: -webkit-linear-gradient(left,#e00203,#0870ae) 0 0 100% 0/0 0 5px 0 stretch;
+		max-height:50px !important;
+
+		}
+	.col-sm-7{
+		margin-top: 15px;
+		border-radius: 15px;
+		box-shadow: 6px 6px 3px 3px lightGrey;
+		border-top: 2px solid lightGrey;
+		border-left: 2px solid lightGrey;
+		padding: 20px;
+
+	}
+	.col-sm-4{
+		margin-top: 15px;
+		border-radius: 15px;
+		box-shadow: 6px 6px 3px 3px lightGrey;
+		border-top: 2px solid lightGrey;
+		border-left: 2px solid lightGrey;
+		padding: 20px;
+
+	}
+	#chart_div{
+		width:100%;
+		height:100%;
+		max-height: 400px; !important
+		max-width: 600px;
+		}
+
+	</style>
+	<script type="text/javascript">
+      google.load("visualization", "1", {packages:["corechart"]});
+      google.setOnLoadCallback(drawChart);
+	  var data, view, selection, options
+      function drawChart() {
+		var threshold = .8;
+		var thresholdHigh = .9;
+        data = new google.visualization.DataTable();
+		data.addColumn('number', 'Number of Zones');
+		data.addColumn('number', 'GVF');
+		data.addRows({{string}}
+		//[[2, 0.68], [3, 0.84]]
+		);
+		maxPlusOne = (data.getColumnRange(0)['max'] + 1)
+		data.addRows([[1,null],
+					[maxPlusOne, null]]);
+		data.sort(0)
+		view = new google.visualization.DataView(data);
+		view.setColumns([0,
+			{type: 'number',
+			calc: function () {
+				return threshold;
+				}
+			},
+			{type: 'number',
+			calc: function () {
+				return thresholdHigh;
+				}
+			},
+			1,
+			{type: 'boolean',
+			role: 'emphasis',
+			calc : function (data, row) {
+				if (data.getValue(row,1) < .9 && data.getValue(row,1) > .8) {
+					return true;
+					} else {
+					return false;
+					}
+				}
+			}
+						]);
+        options = {
+          title: 'Suggested Number of Zones',
+		  hAxis: {
+			minValue: 1,
+			maxValue: maxPlusOne,
+			gridlines: {
+				count : maxPlusOne
+				},
+			title: 'Number of Zones'
+			},
+	      vAxis: {
+		    title: 'Goodness of Variance Fit'
+			},
+		  legend: {
+			position: 'none'
+			},
+		  colors: ['red', 'red', 'blue'],
+		  series: {
+        // "n" should be the series index of the max line
+        // typically this is column index - 1,
+        // so if you have one domain column, one data series
+        // and the max line, it would be:
+			0: {
+				visibleInLegend: false, // set this if you don't want it in the legend
+				enableInteractivity: false, // set this if you don't want the line to spawn tooltips
+				lineWidth: 1,
+				lineDashStyle: [4,4],
+				tooltip : 'none'
+		  },
+		  1: {
+				visibleInLegend: false, // set this if you don't want it in the legend
+				enableInteractivity: false, // set this if you don't want the line to spawn tooltips
+				lineWidth: 1,
+				lineDashStyle: [4,4],
+				tooltip : 'none'
+		  }
+        },
+		  chartArea: {
+			width: '80%',
+			height: '85%'
+			}
+		};
+
+        var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+		chart.draw(view, options);
+		google.visualization.events.addListener(chart, 'select', function () {
+			selection = chart.getSelection();
+			if (selection.length) {
+				var rowIndex = selection[0].row;
+				var zones = data.getValue(rowIndex, 0);
+				if (confirm("Are you sure you want to use " + zones + " zones?")){
+					var formInfo = document.forms['send'];
+					formInfo.classes.value = zones;
+					formInfo.submit();
+					}
+			}
+		  }
+		);
+      }
+	function resize () {
+      var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+      chart.draw(view, options);
+	  google.visualization.events.addListener(chart, 'select', function () {
+			selection = chart.getSelection();
+			if (selection.length) {
+				var rowIndex = selection[0].row;
+				var zones = data.getValue(rowIndex, 0);
+				if (confirm("Are you sure you want to use " + zones + " zones?")){
+					var formInfo = document.forms['send'];
+					formInfo.classes.value = zones;
+					formInfo.submit();
+					}
+			}
+		  }
+		);
+    }
+
+    window.onresize = resize;
+    </script>
+  </head>
+  <body>
+	<div class="container">
+	<header class="page-header">
+        <img id="logo" src="static/img/logonew.png" class="img-responsive img-center">
+      </header>
+	<div id="left" class="col-sm-7">
+    <div id="chart_div" ></div>
+	<div id="form">
+
+      <form id="send" method="post" action="createZones" enctype='application/json'>
+		<input type="hidden" name="classes" value=""/>
+      </form>
+    </div>
+	</div>
+	<div id="right" class="col-sm-4 col-sm-offset-1">
+	<h2 class="text-primary text-center">How to use this chart</h2>
+	<p> This chart shows the recommended number of zones according to the <strong>Goodness of
+	Variance Fit (GVF) </strong> value.  The GVF is a measure of the accuracy of the classification
+	technique between 0 and 1, with 0 being no fit and 1 being perfect fit.  We recommend
+	choosing a number of zones that has a GVF above 0.8 and below 0.9 as we feel this is a good balance
+	between accurate and usable zones.  Click on a point on the graph to use that number of
+	zones and to continue to the completed zones.
+	</p>
+	</div>
+	</div>
+  </body>
+</html>
