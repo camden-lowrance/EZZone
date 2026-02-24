@@ -2,16 +2,16 @@ import math
 import numpy as np
 from scipy.interpolate import griddata
 import pyproj
-from shapely.geometry import MultiPolygon, Polygon, asShape, LineString, mapping, MultiPoint, Point, JOIN_STYLE
-from shapely.ops import cascaded_union
+import geopandas as gpd
+from shapely.geometry import MultiPolygon, Polygon, shape, LineString, mapping, MultiPoint, Point
+from shapely.ops import unary_union
 from shapely.affinity import rotate
 from rasterstats import zonal_stats
 import geojson
-from jenks import jenks
-import brewer2mpl
+from jenkspy import jenks_breaks as jenks
+import matplotlib as mpl
 import matplotlib.pyplot as plt
-from descartes import PolygonPatch
-from matplotlib.collections import PatchCollection
+import matplotlib.colors as mcolors
 from osgeo import gdal
 from osgeo import osr
 
@@ -70,7 +70,7 @@ def geojson_fc_parser(obj, geomtype):
         obj = geojson.loads(obj)
     # noinspection PyTypeChecker
     for i in obj['features']:
-        for v in i.iteritems():
+        for v in i.items():
             for x in v:
                 if isinstance(x, dict) and geomtype in x.values():
                     return x
@@ -100,36 +100,30 @@ def bound_json(x, y, geometry_type=1, in_projection='epsg:4326', out_projection=
     :returns: GeoJSON boundary polygon as a dict
     :rtype: dict
     """
+    # Ensure plain numpy arrays so fancy indexing (np.where) works on both
+    # numpy arrays (demo path via np.loadtxt) and pandas Series (file-upload path).
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
     g = geometry_type
-    inp = in_projection
-    outp = out_projection
     jfeat = []
     crs = {
         "type": "name",
         "properties": {
-            "name": outp
+            "name": out_projection
         }}
 
-    inp = pyproj.Proj(init=inp)
-    outp = pyproj.Proj(init=outp)
+    transformer = pyproj.Transformer.from_crs(in_projection, out_projection, always_xy=True)
 
     # get the point coordinates
     points = np.column_stack([x, y])
 
     # if rectangular desired, find corresponding point for xmin, ymin, xmax, ymax
     if g == 1:
-        print "in function"
-        xmax = [x.max(), y[np.where(x == x.max())].item(0)]
-        xmax = list(pyproj.transform(inp, outp, xmax[0], xmax[1]))
-
-        ymax = [x[np.where(y == y.max())].item(0), y.max()]
-        ymax = list(pyproj.transform(inp, outp, ymax[0], ymax[1]))
-
-        xmin = [x.min(), y[np.where(x == x.min())].item(0)]
-        xmin = list(pyproj.transform(inp, outp, xmin[0], xmin[1]))
-
-        ymin = [x[np.where(y == y.min())].item(0), y.min()]
-        ymin = list(pyproj.transform(inp, outp, ymin[0], ymin[1]))
+        print("in function")
+        xmax = list(transformer.transform(x.max(), y[np.where(x == x.max())].item(0)))
+        ymax = list(transformer.transform(x[np.where(y == y.max())].item(0), y.max()))
+        xmin = list(transformer.transform(x.min(), y[np.where(x == x.min())].item(0)))
+        ymin = list(transformer.transform(x[np.where(y == y.min())].item(0), y.min()))
 
         geoj = geojson.Polygon([[xmax, ymax, xmin, ymin, xmax]], crs=crs)
 
@@ -138,7 +132,7 @@ def bound_json(x, y, geometry_type=1, in_projection='epsg:4326', out_projection=
         m = mapping(points.convex_hull)
         for i in m['coordinates']:
             for j in i:
-                jfeat.append(pyproj.transform(inp, outp, j[0], j[1]))
+                jfeat.append(list(transformer.transform(j[0], j[1])))
 
         geoj = geojson.Polygon([jfeat], crs=crs)
     else:
@@ -202,179 +196,77 @@ def epsg_int(string_epsg):
     return int(''.join(li))
 
 
-# reproject geojson object/string, shapely polygon/multip and return a shapely polygon,
-# can pass projection as string or pyproj object
+# reproject geojson object/string, shapely polygon/multip and return a shapely polygon
 def reproject_poly(obj, in_projection='epsg:3857', out_projection='epsg:4326'):
-    # if our object is a geojson Polygon instance
-    """
-
-    :param obj:
-    :param in_projection:
-    :param out_projection:
-    :return:
-    """
-    # noinspection PyUnresolvedReferences
     if isinstance(obj, geojson.geometry.Polygon):
-        obj = asShape(obj)
-        poly = obj
-    # if our object is a raw string
-    if type(obj) == str:
-        obj = geojson.loads(obj)
-    # if our object is a geojson dict
-    if type(obj) == dict:
-        # is our geojson a feature class?
+        poly = shape(obj)
+    elif type(obj) == str:
+        poly = shape(geojson.loads(obj))
+    elif type(obj) == dict:
         try:
-            poly = asShape(obj['geometry'])
-        # or a regular geometry?
+            poly = shape(obj['geometry'])
         except KeyError:
-            poly = asShape(obj)
-
+            poly = shape(obj)
     else:
         poly = obj
-
-    # pyproj transformation
-    if type(in_projection) != str:
-        inp = in_projection
-    else:
-        inp = pyproj.Proj(init=in_projection)
-    if type(out_projection) != str:
-        outp = out_projection
-    else:
-        outp = pyproj.Proj(init=out_projection)
     if not poly.is_valid:
         poly = poly.buffer(0)
-    # transform coords and return polygon
-    ext_coords = [pyproj.transform(inp, outp, i[0], i[1]) for i in list(poly.exterior.coords) if
-                  not Point(i).within(poly)]
-    # if polygon has interior
-    try:
-        # create new coords if area of inner polygon is greater than 0
-        int_coords = [[pyproj.transform(inp, outp, j[0], j[1]) for j in list(i.coords)] for i in poly.interiors if
-                      (math.floor(Polygon(i).area) > 0)]
-        poly = Polygon(ext_coords, int_coords)
-    except AttributeError:
-        poly = Polygon(ext_coords)
-    return poly
+    return gpd.GeoSeries([poly], crs=in_projection).to_crs(out_projection).iloc[0]
 
 
-# noinspection PyTypeChecker
 def reproject_multip(obj, in_projection='epsg:3857', out_projection='epsg:4326'):
-    """
-    :type obj: object
-    :param in_projection:
-    :param out_projection:
-    :param obj:
-    :type in_projection: object
-    :rtype : object
-    """
-    # array for new multipolygons
-    multipolys = []
-    # iterate through list of multipolygons
-    for polys in obj:
-        # array for reprojected polygons
-        newpolys = []
-        # try to iterate through multipolygon, except when it is only a polygon
-        try:
-            for p in polys:
-                newpolys.append(reproject_poly(p, in_projection, out_projection))
-            # append multipolygon to list of multipolygons
-            multipolys.append(MultiPolygon(newpolys))
-        except TypeError:
-            multipolys.append(reproject_poly(polys, in_projection, out_projection))
-    return multipolys
+    return list(gpd.GeoSeries(obj, crs=in_projection).to_crs(out_projection))
 
 
 # reproject geojson/shapely point
 def reproject_point(obj, in_projection='epsg:3857', out_projection='epsg:4326'):
-    # if object is instance of geojson class
     if isinstance(obj, geojson.geometry.Point):
-        obj = asShape(obj)
-    # if our object is a raw string
-    if type(obj) == str:
-        obj = geojson.loads(obj)
-    # if our object is a geojson dict
-    if type(obj) == dict:
-        # is our geojson a feature class?
+        point = shape(obj)
+    elif type(obj) == str:
+        point = shape(geojson.loads(obj))
+    elif type(obj) == dict:
         try:
-            point = asShape(obj['geometry'])
-        # or a regular geometry?
+            point = shape(obj['geometry'])
         except KeyError:
-            point = asShape(obj)
+            point = shape(obj)
     else:
         point = obj
-
-    # pyproj transformation
-    if type(in_projection) != str:
-        inp = in_projection
-    else:
-        inp = pyproj.Proj(init=in_projection)
-    if type(out_projection) != str:
-        outp = out_projection
-    else:
-        outp = pyproj.Proj(init=out_projection)
-
-    new_coords = [pyproj.transform(inp, outp, i[0], i[1]) for i in list(point.coords)]
-    return Point(new_coords)
+    return gpd.GeoSeries([point], crs=in_projection).to_crs(out_projection).iloc[0]
 
 
-# reproject geojson/shapely point
+# reproject geojson/shapely line
 def reproject_line(obj, in_projection='epsg:3857', out_projection='epsg:4326'):
-    # if object is instance of geojson class
     if isinstance(obj, geojson.geometry.LineString):
-        obj = asShape(obj)
-    # if our object is a raw string
-    if type(obj) == str:
-        obj = geojson.loads(obj)
-    # if our object is a geojson dict
-    if type(obj) == dict:
-        # is our geojson a feature class?
+        line = shape(obj)
+    elif type(obj) == str:
+        line = shape(geojson.loads(obj))
+    elif type(obj) == dict:
         try:
-            line = asShape(obj['geometry'])
-        # or a regular geometry?
+            line = shape(obj['geometry'])
         except KeyError:
-            line = asShape(obj)
+            line = shape(obj)
     else:
         line = obj
-
-    # pyproj transformation
-    if type(in_projection) != str:
-        inp = in_projection
-    else:
-        inp = pyproj.Proj(init=in_projection)
-    if type(out_projection) != str:
-        outp = out_projection
-    else:
-        outp = pyproj.Proj(init=out_projection)
-
-    new_coords = [pyproj.transform(inp, outp, i[0], i[1]) for i in list(line.coords)]
-    return LineString(new_coords)
+    return gpd.GeoSeries([line], crs=in_projection).to_crs(out_projection).iloc[0]
 
 
 # reproject arrays of separate x and y values
 def reproject_array(x, y, inp, outp):
-    # stack x, y coords
-    points = np.column_stack([x, y])
-
-    # pyproj transformation
-    if type(inp) == str:
-        inp = pyproj.Proj(init=inp)
-    if type(outp) == str:
-        outp = pyproj.Proj(init=outp)
-    # 2d array of coords reprojected
-    return np.array([pyproj.transform(inp, outp, p[0], p[1]) for p in points])
+    transformer = pyproj.Transformer.from_crs(inp, outp, always_xy=True)
+    xs, ys = transformer.transform(x, y)
+    return np.column_stack([xs, ys])
 
 
-# return a pyproj projection object given an array of coordinates or shapely polygon in lat/long dd
+# return a pyproj CRS object for the UTM zone containing the given coordinates
 def utmzone(xy):
-    # if input is shapely polygon
     if isinstance(xy, Polygon):
         xy = xy.exterior.coords[0]
-    # calculate zone number, include 1 if southern hemisphere
-    zone = (int(math.floor((xy[0] + 180) / 6) + 1), 1 if xy[1] < 0 else 0)
-    # if in southern hemisphere
-    if zone[1] == 1:
-        return pyproj.Proj('+proj=utm +zone=' + str(zone[0]) + ', +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs')
-    return pyproj.Proj('+proj=utm +zone=' + str(zone[0]) + ', +ellps=WGS84 +datum=WGS84 +units=m +no_defs')
+    zone_num = int(math.floor((xy[0] + 180) / 6) + 1)
+    south = xy[1] < 0
+    proj_str = f'+proj=utm +zone={zone_num} +ellps=WGS84 +datum=WGS84 +units=m +no_defs'
+    if south:
+        proj_str += ' +south'
+    return pyproj.CRS.from_proj4(proj_str)
 
 
 # create a rectangular grid of polygons given a shapely polygon in UTM coords and a row spacing variable
@@ -658,8 +550,8 @@ def grid_circ(spacing, length, center, boundary):
     sector_width = 4.0
     polys = []  # array for storing features to plot
 
-    for x in xrange(0, int(360.0 / sector_width)):
-        for r in xrange(1, radius_end + 1):
+    for x in range(0, int(360.0 / sector_width)):
+        for r in range(1, radius_end + 1):
             if r == 1:
                 segment_vertices = []
                 # first point is center
@@ -756,7 +648,10 @@ def get_poly_stats(array, polys, bounds, stat='mean'):
     nrows, ncols = np.shape(array)
     xres = (xmax - xmin) / float(ncols)
     yres = (ymax - ymin) / float(nrows)
-    geotransform = (xmin, xres, 0, ymin, 0, yres)
+    # rasterstats requires GDAL convention: origin at top-left (ymax), yres negative.
+    # The interpolated array has row 0 at ymin, so flip it to match.
+    geotransform = (xmin, xres, 0, ymax, 0, -yres)
+    array = np.flipud(array)
 
     stats = []
 
@@ -784,29 +679,11 @@ def classify(value, breaks):
 
 def plot_multip(polys):
     plt.close('all')
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
     try:
-        if len(polys) < 7:
-            colors = ['red', 'blue', 'green', 'orange', 'yellow', 'purple']
-            for i, x in enumerate(polys):
-                try:
-                    polyp = [PolygonPatch(p) for p in x]
-                    ax.add_collection(PatchCollection(polyp, facecolors=colors[i]))
-                except TypeError:
-                    polyp = PolygonPatch(x, fc=colors[i])
-                    ax.add_patch(polyp)
-        for i, x in enumerate(polys):
-            try:
-                polyp = [PolygonPatch(p) for p in x]
-                ax.add_collection(PatchCollection(polyp))
-            except TypeError:
-                polyp = PolygonPatch(x)
-                ax.add_patch(polyp)
+        gdf = gpd.GeoDataFrame(geometry=list(polys))
     except TypeError:
-        ax.add_patch(PolygonPatch(polys))
-
-    ax.autoscale()
+        gdf = gpd.GeoDataFrame(geometry=[polys])
+    gdf.plot(cmap='tab10', figsize=(8, 8))
     plt.show()
 
 
@@ -841,142 +718,52 @@ def small_polys(multip, area, multip2):
     return MultiPolygon(small_p)
 
 
-def s_polys_up(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
-    area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in enumerate(polys):
-        # if idx <= med:
-        # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-        try:
-            area_inters = small_polys(multip, area, polys[idx + 1])
-        except IndexError:
-            break
-        if area_inters.area > 0:
-            polys[idx] = polys[idx].difference(area_inters)
-            polys[idx + 1] = cascaded_union([polys[idx + 1], area_inters])
-            #else:
-            #    break
-    return polys
+def _s_polys(polys, spacing, *, reverse=False, step=1, half=False):
+    """Move small polygons at zone boundaries into the adjacent zone.
 
-
-def s_polys_up_med(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
+    Args:
+        polys:   list of shapely geometries (one per Jenks zone)
+        spacing: grid spacing used to produce polys; area threshold = ceil(spacing**2)
+        reverse: iterate from high index to low (True) or low to high (False)
+        step:    index offset to neighbour (1 or 2)
+        half:    restrict iteration to the first half (forward) or second half (reverse)
+    """
     area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in enumerate(polys):
-        if idx <= med:
-            # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-            try:
-                area_inters = small_polys(multip, area, polys[idx + 1])
-            except IndexError:
+    med = np.median(range(len(polys))) if half else None
+    items = reversed(list(enumerate(polys))) if reverse else enumerate(polys)
+    for idx, multip in items:
+        if half:
+            if not reverse and idx > med:
                 break
-            if area_inters.area > 0:
-                polys[idx] = polys[idx].difference(area_inters)
-                polys[idx + 1] = cascaded_union([polys[idx + 1], area_inters])
-        else:
-            break
-    return polys
-
-
-def s_polys_up_two(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
-    area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in enumerate(polys):
-        # if idx <= med:
-        # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-        try:
-            area_inters = small_polys(multip, area, polys[idx + 2])
-        except IndexError:
-            break
-        if area_inters.area > 0:
-            polys[idx] = polys[idx].difference(area_inters)
-            polys[idx + 2] = cascaded_union([polys[idx + 2], area_inters])
-            #else:
-            #    break
-    return polys
-
-
-def s_polys_down(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
-    area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in reversed(list(enumerate(polys))):
-        # if idx >= med:
-        # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-        try:
-            area_inters = small_polys(multip, area, polys[idx - 1])
-        except IndexError:
-            break
-        if area_inters.area > 0:
-            polys[idx] = polys[idx].difference(area_inters)
-            polys[idx - 1] = cascaded_union([polys[idx - 1], area_inters])
-            #else:
-            #    break
-    return polys
-
-
-def s_polys_down_two(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
-    area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in reversed(list(enumerate(polys))):
-        # if idx >= med:
-        # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-        try:
-            area_inters = small_polys(multip, area, polys[idx - 2])
-        except IndexError:
-            break
-        if area_inters.area > 0:
-            polys[idx] = polys[idx].difference(area_inters)
-            polys[idx - 2] = cascaded_union([polys[idx - 2], area_inters])
-            #else:
-            #    break
-    return polys
-
-
-def s_polys_down_med(polys, spacing):
-    # input list of polygons/multipolygons and spacing attribute used to produce polygons
-    # area
-    area = math.ceil(spacing ** 2)
-    med = np.median([i for i, p in enumerate(polys)])
-    for idx, multip in reversed(list(enumerate(polys))):
-        if idx >= med:
-            # identify polygons in j that are below the area threshold and intersect with the next multipolygon
-            try:
-                area_inters = small_polys(multip, area, polys[idx - 1])
-            except IndexError:
+            if reverse and idx < med:
                 break
-            if area_inters.area > 0:
-                polys[idx] = polys[idx].difference(area_inters)
-                polys[idx - 1] = cascaded_union([polys[idx - 1], area_inters])
-        else:
+        neighbor = idx - step if reverse else idx + step
+        try:
+            area_inters = small_polys(multip, area, polys[neighbor])
+        except IndexError:
             break
+        if area_inters.area > 0:
+            polys[idx] = polys[idx].difference(area_inters)
+            polys[neighbor] = unary_union([polys[neighbor], area_inters])
     return polys
 
 
 def remove_sliver(poly):
     eps = .001
-    return poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+    return poly.buffer(eps, 1, join_style=2).buffer(-eps, 1, join_style=2)
 
 
 def simplify_polys(polys, spacing, smooth):
     new_polys = polys[:]
     for sm in range(1, smooth + 1):
-        new_polys = s_polys_up_med(new_polys, (sm * spacing))
-        new_polys = s_polys_down_med(new_polys, (sm * spacing))
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=False, step=1, half=True)
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=True,  step=1, half=True)
     for sm in range(1, smooth + 1):
-        new_polys = s_polys_up(new_polys, (sm * spacing))
-        new_polys = s_polys_down(new_polys, (sm * spacing))
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=False, step=1)
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=True,  step=1)
     for sm in range(1, smooth + 1):
-        new_polys = s_polys_up_two(new_polys, (sm * spacing))
-        new_polys = s_polys_down_two(new_polys, (sm * spacing))
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=False, step=2)
+        new_polys = _s_polys(new_polys, sm * spacing, reverse=True,  step=2)
     try:
         new_polys = [remove_sliver(poly).simplify(.01) for poly in new_polys]
     except ValueError:
@@ -1015,10 +802,10 @@ def goodness_of_variance_fit(array, classes):
 
 
 def gvf_array(stats, max_class):
+    n_unique = len(np.unique(stats))
     gvf_arr = []
-    for i in range(2, max_class + 1):
+    for i in range(2, min(max_class, n_unique) + 1):
         gvf = goodness_of_variance_fit(stats, i)
-        # if gvf > 0:
         gvf_arr.append(round(gvf, 2))
         if gvf >= .9:
             break
@@ -1041,6 +828,8 @@ def get_poly_jenks(poly_stats, polys, classes):
 
     """
 
+    # cap classes to the number of unique values jenks can work with
+    classes = min(classes, len(np.unique(poly_stats)))
     # get the break points
     classes = jenks(poly_stats, classes)
 
@@ -1057,7 +846,7 @@ def get_poly_jenks(poly_stats, polys, classes):
     poly_sort = [[polys[index] for index in zone] for zone in zone_indices]
 
     # merge geometries, generate list of zones, create geojson feature collection from list
-    poly_comb = [cascaded_union(polyz) for polyz in poly_sort]
+    poly_comb = [unary_union(polyz) for polyz in poly_sort]
 
     classes = [round(i,1) for i in classes]
     class_breaks = []
@@ -1094,15 +883,12 @@ def zones_to_geojson_fc(zones, class_breaks, inp=None, outp='epsg:4326'):
 def json_legend(class_breaks):
     num_classes = len(class_breaks)
     if num_classes == 2:
-        cmap = ['#0000FF', '#FF0000']
-        #return {key + 1: {'fillColor': cmap[key], 'values': value} for (key, value) in enumerate(class_breaks)}
-        return [[cmap[i], class_breaks[i]] for i in range(num_classes)]
+        colors = ['#0000FF', '#FF0000']
+        return [[colors[i], class_breaks[i]] for i in range(num_classes)]
     else:
-        # get color map of blues based on number of classes
-        cmap = brewer2mpl.get_map('RdBu', 'Diverging', num_classes, reverse=True)
-        return [[cmap.hex_colors[i], class_breaks[i]] for i in range(num_classes)]
-        #return {key + 1: {'fillColor': value, 'values': class_breaks[key]}
-        #        for (key, value) in enumerate(cmap.hex_colors)}
+        cmap = mpl.colormaps['RdBu_r'].resampled(num_classes)
+        hex_colors = [mcolors.to_hex(cmap(i)) for i in range(num_classes)]
+        return [[hex_colors[i], class_breaks[i]] for i in range(num_classes)]
 
 
 def json_color_codes(num_classes):
@@ -1111,16 +897,15 @@ def json_color_codes(num_classes):
     :param num_classes: number of classes to create a color map for
     :return: two dictionaries, first dict is for default openlayers display, second for select openlayers display
     '''
-    # special case for two zones
     if num_classes == 2:
-        cmap = ['#0000FF', '#FF0000']
-        return {key + 1: {'fillColor': value} for (key, value) in enumerate(cmap)}, {
-            key + 1: {'fillColor': value, 'strokeColor': value} for (key, value) in enumerate(cmap)}
+        colors = ['#0000FF', '#FF0000']
+        return {key + 1: {'fillColor': value} for (key, value) in enumerate(colors)}, {
+            key + 1: {'fillColor': value, 'strokeColor': value} for (key, value) in enumerate(colors)}
     else:
-        # get color map of blues based on number of classes
-        cmap = brewer2mpl.get_map('RdBu', 'Diverging', num_classes, reverse=True)
-        return {key + 1: {'fillColor': value} for (key, value) in enumerate(cmap.hex_colors)}, {
-            key + 1: {'fillColor': value, 'strokeColor': value} for (key, value) in enumerate(cmap.hex_colors)}
+        cmap = mpl.colormaps['RdBu_r'].resampled(num_classes)
+        hex_colors = [mcolors.to_hex(cmap(i)) for i in range(num_classes)]
+        return {key + 1: {'fillColor': value} for (key, value) in enumerate(hex_colors)}, {
+            key + 1: {'fillColor': value, 'strokeColor': value} for (key, value) in enumerate(hex_colors)}
 
 
 # noinspection PyUnusedLocal
@@ -1135,11 +920,11 @@ def create_geotiff(filename, array, bounds, pyproj_object):
                                                          gdal.GDT_Float32, ['TFW=YES', 'COMPRESS=PACKBITS'])
     output_raster.SetGeoTransform(geotransform)  # Specify its coordinates
     srs = osr.SpatialReference()  # Establish its coordinate encoding
-    srs.ImportFromProj4(pyproj_object.srs)  # import from pyproj object
+    srs.ImportFromProj4(pyproj_object.to_proj4())  # import from pyproj CRS object
     output_raster.SetProjection(srs.ExportToWkt())  # Exports the coordinate system to the file
     output_raster.GetRasterBand(1).WriteArray(array)  # Writes my array to the raster
     output_raster = None
 
 
 def asshape(geoj):
-    return asShape(geoj)
+    return shape(geoj)
