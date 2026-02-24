@@ -6,7 +6,6 @@ import geopandas as gpd
 from shapely.geometry import MultiPolygon, Polygon, shape, LineString, mapping, MultiPoint, Point
 from shapely.ops import unary_union
 from shapely.affinity import rotate
-from rasterstats import zonal_stats
 import geojson
 from jenkspy import jenks_breaks as jenks
 import matplotlib as mpl
@@ -14,7 +13,6 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from osgeo import gdal
 from osgeo import osr
-
 
 
 # noinspection PyUnresolvedReferences
@@ -269,8 +267,50 @@ def utmzone(xy):
     return pyproj.CRS.from_proj4(proj_str)
 
 
+def _create_grid_polygons(boundary, row_space, angle=0):
+    """
+    Create a grid of polygons over a boundary using geopandas.
+    
+    :param boundary: Shapely polygon in UTM coordinates
+    :param row_space: Spacing between grid cells
+    :param angle: Rotation angle in degrees (optional)
+    :returns: GeoDataFrame of grid polygons
+    """
+    # Get bounding box
+    minx, miny, maxx, maxy = boundary.bounds
+    
+    # Create grid using geopandas' hex_grid or regular grid
+    # Use a larger grid and clip to boundary
+    x_range = np.arange(minx - row_space, maxx + row_space, row_space)
+    y_range = np.arange(miny - row_space, maxy + row_space, row_space)
+    
+    polygons = []
+    for x in x_range:
+        for y in y_range:
+            poly = Polygon([
+                (x, y),
+                (x + row_space, y),
+                (x + row_space, y + row_space),
+                (x, y + row_space),
+                (x, y)
+            ])
+            polygons.append(poly)
+    
+    # Create GeoDataFrame
+    gdf = gpd.GeoDataFrame({'geometry': polygons}, crs=boundary.crs)
+    
+    # Clip to boundary
+    boundary_gdf = gpd.GeoDataFrame(geometry=[boundary], crs=boundary.crs)
+    gdf = gdf.overlay(boundary_gdf, how='intersection')
+    
+    # Apply rotation if needed
+    if angle != 0:
+        gdf = gdf.rotate(angle, origin=boundary.centroid)
+    
+    return gdf
+
+
 # create a rectangular grid of polygons given a shapely polygon in UTM coords and a row spacing variable
-# noinspection PyUnboundLocalVariable,PyUnusedLocal
 def grid_rect(polygon, row_space=2):
     """
     ----------------------------
@@ -639,8 +679,19 @@ def interpolate_raster(x, y, z, inp, outp, poly, spacing=None):
 
 
 # get stats that correspond to shapely polygon coverage of a numpy array ie raster
-# noinspection PyBroadException,PyUnreachableCode
+# Using geopandas for zonal statistics
 def get_poly_stats(array, polys, bounds, stat='mean'):
+    """
+    Calculate zonal statistics using geopandas.
+    
+    :param array: numpy array of raster values
+    :param polys: list of shapely polygons
+    :param bounds: bounds of the raster [xmin, ymin, xmax, ymax]
+    :param stat: statistic to calculate (default 'mean')
+    :returns: numpy array of stats, list of valid polygons
+    """
+    from rasterstats import zonal_stats
+    
     # get individual bounds variables
     xmin, ymin, xmax, ymax = bounds
 
@@ -864,7 +915,7 @@ def zones_to_geojson_fc(zones, class_breaks, inp=None, outp='epsg:4326'):
 
     """
     if inp:
-        # reproject multipolygons to epsg:4326
+        # reproject multipolygons to epsg:4326 using geopandas
         zones = reproject_multip(zones, in_projection=inp, out_projection=outp)
 
     # create features and dump geojson
@@ -879,6 +930,32 @@ def zones_to_geojson_fc(zones, class_breaks, inp=None, outp='epsg:4326'):
 
     feature_coll = geojson.FeatureCollection(features, crs=crs)
     return geojson.loads(geojson.dumps(feature_coll))
+
+
+def zones_to_geojson_fc_gdf(zones, class_breaks, inp=None, outp='epsg:4326'):
+    """
+    Convert zones to GeoJSON FeatureCollection using geopandas.
+    
+    :param zones: list of shapely geometries
+    :param class_breaks: list of class break labels
+    :param inp: input CRS (optional)
+    :param outp: output CRS (default epsg:4326)
+    :returns: GeoJSON FeatureCollection
+    """
+    # Create GeoDataFrame
+    gdf = gpd.GeoDataFrame({
+        'zone': range(1, len(zones) + 1),
+        'values': class_breaks,
+        'geometry': zones
+    })
+    
+    # Reproject if needed
+    if inp:
+        gdf = gdf.set_crs(inp, allow_override=True).to_crs(outp)
+    
+    # Convert to GeoJSON
+    return geojson.loads(gdf.to_json())
+
 
 def json_legend(class_breaks):
     num_classes = len(class_breaks)

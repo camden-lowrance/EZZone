@@ -81,7 +81,7 @@ def generate_zones(
         else:
             boundary = boundary_geojson
     
-    # Reproject boundary to UTM
+    # Reproject boundary to UTM using geopandas
     boundary_shp = mz.reproject_poly(shape(boundary['geometry']), in_projection=in_projection, out_projection='epsg:3857')
     utm_crs = mz.utmzone(boundary_shp)
     boundary_utm = mz.reproject_poly(shape(boundary['geometry']), in_projection=in_projection, out_projection=utm_crs)
@@ -120,8 +120,8 @@ def generate_zones(
     num_classes = min(num_classes, len(np.unique(poly_stats)))
     poly_comb, class_breaks = mz.get_poly_jenks(poly_stats, polys2, num_classes)
     
-    # Convert to GeoJSON
-    zones_geojson = mz.zones_to_geojson_fc(poly_comb, class_breaks, inp=utm_crs)
+    # Convert to GeoJSON using geopandas
+    zones_geojson = mz.zones_to_geojson_fc_gdf(poly_comb, class_breaks, inp=utm_crs)
     
     # Get color codes for frontend
     cmap_def, cmap_sel = mz.json_color_codes(num_classes)
@@ -168,8 +168,8 @@ def simplify_zones(zones_geojson, row_spacing, smooth=1):
     # Apply simplification
     new_polys = mz.simplify_polys(polys, row_spacing, smooth)
     
-    # Convert back to GeoJSON
-    return mz.zones_to_geojson_fc(new_polys, class_breaks)
+    # Convert back to GeoJSON using geopandas
+    return mz.zones_to_geojson_fc_gdf(new_polys, class_breaks)
 
 
 def compute_gvf(x, y, z, field_type, in_projection='epsg:4326', row_spacing=100):
@@ -229,6 +229,7 @@ def export_zones(zones_geojson, format='geojson'):
         import zipfile
         import tempfile
         
+        # Use geopandas to export shapefile
         gdf = gpd.GeoDataFrame.from_features(zones_geojson['features'], crs='epsg:4326')
         with tempfile.TemporaryDirectory() as tmpdir:
             outpath = f"{tmpdir}/zones.shp"
