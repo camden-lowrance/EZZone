@@ -24,6 +24,7 @@ Usage:
 
 import json
 import math
+import os
 import numpy as np
 import pyproj
 import geopandas as gpd
