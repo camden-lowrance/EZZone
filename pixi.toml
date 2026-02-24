@@ -1,0 +1,10 @@
+[workspace]
+authors = ["camdenl <admin@vvvanguards.com>"]
+channels = ["conda-forge"]
+name = "ezzone-pyanywhere"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
