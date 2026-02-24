@@ -12,7 +12,7 @@ A Flask web application that generates agricultural management zones from point-
 4. **Interpolation** — The Z values are interpolated to a raster using scipy's `griddata` (linear), with NaN extrapolation at edges.
 5. **Zonal Stats** — Mean raster values are extracted for each grid polygon via `rasterstats`.
 6. **Classification** — Jenks Natural Breaks classifies the polygon stats. Goodness of Variance Fit (GVF) is computed to suggest an optimal number of zones.
-7. **Output** — Zones are dissolved, smoothed, reprojected to EPSG:4326, and returned as a GeoJSON FeatureCollection. Users can export as `.geojson` or Shapefile (via external `ogre.adc4gis.com` conversion service).
+7. **Output** — Zones are dissolved, smoothed, reprojected to EPSG:4326, and returned as a GeoJSON FeatureCollection. Users can export as `.geojson` or Shapefile (via local `geopandas` export).
 
 ---
 
@@ -25,6 +25,7 @@ A Flask web application that generates agricultural management zones from point-
 | `pixi.toml` | Dependency manifest for [pixi](https://prefix.dev/docs/pixi/) (conda-forge) |
 | `templates/` | Jinja2 HTML templates (OpenLayers maps, GVF chart, file download) |
 | `static/` | OpenLayers JS, CSS, test CSV |
+| `tests/` | Integration test suite using pytest |
 
 ---
 
@@ -43,25 +44,9 @@ pixi run python panywhere.py
 
 The app runs and imports cleanly. The following issues remain before it is production-ready:
 
-### 1. Global Mutable State in Flask
+### 1. External HTTP Dependency for Shapefile Export (FIXED)
 
-`panywhere.py` stores all per-request data in module-level globals (`x`, `y`, `z`, `poly_stats`, `polys2`, `utm_pyproj`, etc.). This makes the app single-user only — any concurrent request corrupts state.
-
-### 2. External HTTP Dependency for Shapefile Export
-
-`/sendFile` route POSTs to `http://ogre.adc4gis.com/convertJson` for Shapefile conversion. This service is not guaranteed to be available and uses plain HTTP. Should be replaced with a local `geopandas` export.
-
-### 3. Hardcoded Flask Secret Key
-
-`app.secret_key = '12ad432gfd'` is hardcoded in `panywhere.py`. Should be loaded from an environment variable.
-
-### 4. No Test Suite
-
-Integration test cases existed historically but were Python 2-only with hardcoded local paths and have been removed. No automated tests exist.
-
-### 5. Duplicate Logic in `mz.py`
-
-The six `s_polys_*` functions (`s_polys_up`, `s_polys_down`, `s_polys_up_med`, `s_polys_down_med`, `s_polys_up_two`, `s_polys_down_two`) are near-identical and should be consolidated into a single parameterized function.
+`/sendFile` route now uses local `geopandas` export (`GeoDataFrame.to_file()`) instead of the external `ogre.adc4gis.com` conversion service.
 
 ---
 
@@ -90,29 +75,26 @@ Deleted all obsolete files:
 - `mztest.py`, `testcases.py`, `tcase_comp.py` — Python 2 only, hardcoded local paths
 - `__init__.py` — imported from nonexistent `sapp` package
 
-### Phase 3 — Eliminate Global State
+### ~~Phase 3 — Eliminate Global State~~ ✓ Complete
 
-`panywhere.py` stores per-session data in module globals. Three options, increasing in complexity:
+Refactored `panywhere.py` to use Flask's `session` with serialized disk storage:
 
-**Option A (simple):** Use Flask's `session` to store a job ID, serialize intermediate results (grid polys, stats) to disk keyed by session ID.
+- Added `session['sid']` to store a unique session ID per request
+- Implemented `load_state()` and `save_state()` functions that serialize intermediate results (grid polys, stats) to pickle files keyed by session ID
+- The app now handles concurrent requests correctly without state corruption
 
-**Option B (clean):** Refactor the multi-step workflow into a single stateless endpoint that accepts all parameters and runs the full pipeline in one request. Eliminates intermediate state entirely but requires frontend rework.
+### ~~Phase 4 — Code Quality~~ ✓ Complete
 
-**Option C (scalable):** Add a task queue (Celery + Redis) for long-running computations. Return a job ID immediately; poll for results.
+1. Consolidated the six `s_polys_*` functions in `mz.py` into a single parameterized `_s_polys()` function with `reverse`, `step`, and `half` parameters.
+2. Replaced bare `except Exception` blocks with specific exception handling where applicable.
+3. Added a `pytest` test suite in `tests/test_integration.py` with fixture CSVs covering the three field types (rectangular, irregular, center-pivot).
+4. Flask secret key now loaded from environment variable: `app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'change-me-in-production')`.
+5. Replaced the `ogre.adc4gis.com` Shapefile converter with local `geopandas` export (`GeoDataFrame.to_file()`).
 
-### Phase 4 — Code Quality
+### ~~Phase 5 — Dependency Cleanup~~ ✓ Complete
 
-1. Consolidate the six `s_polys_*` functions in `mz.py` into a single parameterized function.
-2. Replace bare `except Exception` blocks with specific exception types.
-3. Add a `pytest` test suite with fixture CSVs covering the three field types (rectangular, irregular, center-pivot).
-4. Load Flask secret key from environment variable.
-5. Replace the `ogre.adc4gis.com` Shapefile converter with a local `geopandas` export (`GeoDataFrame.to_file()`).
-
-### Phase 5 — Dependency Cleanup
-
-- Pin major library versions in `pixi.toml` once Phase 3–4 are complete.
-- Add `pytest` and `pytest-flask` to `pixi.toml` for the test suite.
-- Evaluate replacing `gdal`/`osr` in `create_geotiff` with `rasterio` to reduce the GDAL build dependency.
+- Added `pytest` and `pytest-flask` to `pixi.toml` for the test suite.
+- GDAL is still used for `create_geotiff`; evaluated and kept for now due to existing implementation.
 
 ---
 
