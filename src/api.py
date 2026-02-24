@@ -72,7 +72,7 @@ def init_session():
     session_id = str(uuid.uuid4())
     session['sid'] = session_id
     
-    test_file = os.path.join(current_app.root_path, 'static/test.csv')
+    test_file = os.path.join(current_app.root_path, '..', 'tests', 'fixtures', 'test.csv')
     
     file = request.files.get('file')
     columns = request.json.get('columns', {}) if request.is_json else {}

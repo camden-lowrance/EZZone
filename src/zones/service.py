@@ -32,6 +32,17 @@ import numpy as np
 import geopandas as gpd
 from shapely.geometry import shape
 
+def _extract_geometry(boundary: dict) -> dict:
+    """Extract a raw geometry dict from various GeoJSON structures."""
+    if boundary.get('type') == 'FeatureCollection':
+        return boundary['features'][0]['geometry']
+    if boundary.get('type') == 'Feature':
+        return boundary['geometry']
+    if 'geometry' in boundary and isinstance(boundary['geometry'], dict):
+        return boundary['geometry']
+    return boundary  # raw geometry (Polygon, etc.)
+
+
 from src.geo import (
     bound_json,
     reproject_poly,
@@ -94,21 +105,23 @@ def generate_zones(
     z = np.asarray(z, dtype=float)
     
     if boundary_geojson is None:
-        boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
+        boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection, out_projection=in_projection)
     else:
         if isinstance(boundary_geojson, str):
             boundary = json.loads(boundary_geojson)
         else:
             boundary = boundary_geojson
     
-    boundary_shp = reproject_poly(
-        shape(boundary['geometry']),
+    boundary_geom = _extract_geometry(boundary)
+
+    boundary_wgs84 = reproject_poly(
+        shape(boundary_geom),
         in_projection=in_projection,
-        out_projection='epsg:3857'
+        out_projection='epsg:4326'
     )
-    utm_crs = utmzone(boundary_shp)
+    utm_crs = utmzone(boundary_wgs84)
     boundary_utm = reproject_poly(
-        shape(boundary['geometry']),
+        shape(boundary_geom),
         in_projection=in_projection,
         out_projection=utm_crs
     )
@@ -216,19 +229,21 @@ def compute_gvf(
     y = np.asarray(y, dtype=float)
     z = np.asarray(z, dtype=float)
     
-    boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
-    boundary_shp = reproject_poly(
-        shape(boundary['geometry']),
+    boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection, out_projection=in_projection)
+    boundary_geom = boundary.get('geometry', boundary)
+
+    boundary_wgs84 = reproject_poly(
+        shape(boundary_geom),
         in_projection=in_projection,
-        out_projection='epsg:3857'
+        out_projection='epsg:4326'
     )
-    utm_crs = utmzone(boundary_shp)
+    utm_crs = utmzone(boundary_wgs84)
     boundary_utm = reproject_poly(
-        shape(boundary['geometry']),
+        shape(boundary_geom),
         in_projection=in_projection,
         out_projection=utm_crs
     )
-    
+
     if field_type == 1:
         row_space = get_spacing(boundary_utm, row_spacing)
         polys = grid_rect(boundary_utm, row_space)

@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 import numpy as np
 import pyproj
+from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import MultiPolygon, Polygon, shape, LineString, mapping, MultiPoint, Point
 from shapely.ops import unary_union
@@ -122,11 +123,12 @@ def bound_json(
     points = np.column_stack([x, y])
 
     if g == 1:
-        xmax = list(transformer.transform(x.max(), y[np.where(x == x.max())].item(0)))
-        ymax = list(transformer.transform(x[np.where(y == y.max())].item(0), y.max()))
-        xmin = list(transformer.transform(x.min(), y[np.where(x == x.min())].item(0)))
-        ymin = list(transformer.transform(x[np.where(y == y.min())].item(0), y.min()))
-        geoj = geojson.Polygon([[xmax, ymax, xmin, ymin, xmax]], crs=crs)
+        # Build explicit axis-aligned bounding rectangle (SW→SE→NE→NW→SW)
+        sw = list(transformer.transform(x.min(), y.min()))
+        se = list(transformer.transform(x.max(), y.min()))
+        ne = list(transformer.transform(x.max(), y.max()))
+        nw = list(transformer.transform(x.min(), y.max()))
+        geoj = geojson.Polygon([[sw, se, ne, nw, sw]], crs=crs)
     elif g == 2 or g == 3:
         points = MultiPoint(points)
         m = mapping(points.convex_hull)

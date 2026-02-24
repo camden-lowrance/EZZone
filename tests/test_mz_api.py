@@ -92,8 +92,8 @@ def test_compute_gvf():
     
     assert isinstance(gvf, list)
     assert len(gvf) > 0
-    assert all(isinstance(item, list) for item in gvf)
-    assert all(len(item) == 2 for item in gvf)  # [num_classes, gvf_value]
+    assert all(isinstance(v, float) for v in gvf)
+    assert all(0 <= v <= 1 for v in gvf)
 
 
 def test_simplify_zones():
