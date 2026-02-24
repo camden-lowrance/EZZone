@@ -3,17 +3,29 @@ Flask app for generating agricultural management zones.
 Thin wrapper around mz_api - the core algorithm is decoupled.
 """
 
-from flask import render_template, request, Response, Flask, jsonify, session
-from werkzeug.utils import secure_filename
-import mz_api
-import numpy as np
-import pandas as pd
+from __future__ import annotations
+
 import os
 import uuid
 import io
 import json as json_mod
 import zipfile
 import tempfile
+
+import numpy as np
+import pandas as pd
+from flask import (
+    Flask,
+    render_template,
+    request,
+    Response,
+    jsonify,
+    session
+)
+from werkzeug.utils import secure_filename
+
+import mz_api
+
 
 app = Flask(__name__)
 
@@ -27,17 +39,57 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'change-me-in-production')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1] in app.config['ALLOWED_EXTENSIONS']
+def allowed_file(filename: str) -> bool:
+    """
+    Check if a filename has an allowed extension.
+
+    Args:
+        filename: The filename to check.
+
+    Returns:
+        True if the file extension is allowed, False otherwise.
+    """
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
 @app.route('/')
-def index():
+def index() -> str:
+    """
+    Render the main index page.
+
+    Returns:
+        Rendered HTML template.
+    """
     return render_template('index2.html')
 
 
+def _parse_column(df: pd.DataFrame, col_name: str) -> np.ndarray:
+    """
+    Parse a DataFrame column to numeric array.
+
+    Args:
+        df: Pandas DataFrame.
+        col_name: Name of the column to parse.
+
+    Returns:
+        NumPy array of numeric values.
+    """
+    if df[col_name].dtype != 'float64':
+        return pd.to_numeric(
+            df[col_name].astype(str).str.replace(',', '.'),
+            errors='coerce'
+        ).values
+    return df[col_name].values
+
+
 @app.route('/upload', methods=['POST', 'GET'])
-def upload():
+def upload() -> str:
+    """
+    Handle file upload and initialize session with point data.
+
+    Returns:
+        Rendered template (rect.html, vri.html, irreg.html, or error template).
+    """
     session['sid'] = str(uuid.uuid4())
     
     fileup = request.files['file']
@@ -61,27 +113,20 @@ def upload():
         y = _parse_column(df, request.form['Y'])
         z = _parse_column(df, request.form['Z'])
     else:
-        # Demo mode - use static/test.csv
         x, y, z = np.loadtxt(TEST_FILE, skiprows=1, delimiter=",", unpack=True)
     
-    inp = 'epsg:' + str(request.form['coord'])
+    inp = f"epsg:{request.form['coord']}"
     field_type = int(request.form['field'])
     unit_type = request.form['units']
     
-    # Convert units if needed
-    if unit_type == 'f':
-        factor = 0.3048
-    else:
-        factor = 1
+    factor = 0.3048 if unit_type == 'f' else 1
     
-    # Store in session for subsequent steps
     session['x'] = x.tolist()
     session['y'] = y.tolist()
     session['z'] = z.tolist()
     session['inp'] = inp
     session['field_type'] = field_type
     
-    # Handle field-type specific parameters
     if field_type == 1:
         try:
             row_spacing = float(request.form['row']) * factor
@@ -92,7 +137,11 @@ def upload():
         session['pivot_length'] = None
         
         try:
-            json_bound = mz_api.generate_zones(x, y, z, field_type, inp, row_spacing=row_spacing, num_classes=3)
+            json_bound = mz_api.generate_zones(
+                x, y, z, field_type, inp,
+                row_spacing=row_spacing,
+                num_classes=3
+            )
             boundary = json_bound['boundary']
         except RuntimeError:
             return render_template('badEpsg.html')
@@ -110,7 +159,12 @@ def upload():
         session['row_spacing'] = None
         
         try:
-            json_bound = mz_api.generate_zones(x, y, z, field_type, inp, pivot_spacing=pivot_spacing, pivot_length=pivot_length, num_classes=3)
+            json_bound = mz_api.generate_zones(
+                x, y, z, field_type, inp,
+                pivot_spacing=pivot_spacing,
+                pivot_length=pivot_length,
+                num_classes=3
+            )
             boundary = json_bound['boundary']
         except RuntimeError:
             return render_template('badEpsg.html')
@@ -127,7 +181,11 @@ def upload():
         session['pivot_length'] = None
         
         try:
-            json_bound = mz_api.generate_zones(x, y, z, field_type, inp, row_spacing=row_spacing, num_classes=3)
+            json_bound = mz_api.generate_zones(
+                x, y, z, field_type, inp,
+                row_spacing=row_spacing,
+                num_classes=3
+            )
             boundary = json_bound['boundary']
         except RuntimeError:
             return render_template('badEpsg.html')
@@ -137,21 +195,19 @@ def upload():
     return render_template('badFile.html')
 
 
-def _parse_column(df, col_name):
-    """Parse a DataFrame column to numeric array."""
-    if df[col_name].dtype != 'float64':
-        return pd.to_numeric(df[col_name].astype(str).str.replace(',', '.'), errors='coerce').values
-    return df[col_name].values
-
-
 @app.route('/createRect', methods=['POST'])
-def createRect():
+def createRect() -> str:
+    """
+    Create zones for rectangular field.
+
+    Returns:
+        Rendered chart.html template with GVF data.
+    """
     x = np.array(session['x'])
     y = np.array(session['y'])
     z = np.array(session['z'])
     inp = session['inp']
     row_spacing = session['row_spacing']
-    
     content = str(request.form['jsonval'])
     
     result = mz_api.generate_zones(
@@ -160,7 +216,7 @@ def createRect():
         in_projection=inp,
         row_spacing=row_spacing,
         boundary_geojson=content,
-        num_classes=10  # Get max for GVF chart
+        num_classes=10
     )
     
     session['result'] = {
@@ -175,14 +231,19 @@ def createRect():
 
 
 @app.route('/createVri', methods=['POST'])
-def createVri():
+def createVri() -> str:
+    """
+    Create zones for VRI (center-pivot) field.
+
+    Returns:
+        Rendered chart.html template with GVF data.
+    """
     x = np.array(session['x'])
     y = np.array(session['y'])
     z = np.array(session['z'])
     inp = session['inp']
     pivot_spacing = session['pivot_spacing']
     pivot_length = session['pivot_length']
-    
     content = str(request.form['jsonval'])
     
     result = mz_api.generate_zones(
@@ -199,7 +260,7 @@ def createVri():
         'zones': result['zones'],
         'gvf': result['gvf'],
         'class_breaks': result['class_breaks'],
-        'row_spacing': 0  # VRI uses pivot spacing
+        'row_spacing': 0
     }
     
     gvf_json = json_mod.dumps(result['gvf'])
@@ -207,13 +268,18 @@ def createVri():
 
 
 @app.route('/createIrreg', methods=['POST'])
-def createIrreg():
+def createIrreg() -> str:
+    """
+    Create zones for irregular field.
+
+    Returns:
+        Rendered chart.html template with GVF data.
+    """
     x = np.array(session['x'])
     y = np.array(session['y'])
     z = np.array(session['z'])
     inp = session['inp']
     row_spacing = session['row_spacing']
-    
     content = str(request.form['jsonval'])
     
     result = mz_api.generate_zones(
@@ -237,11 +303,16 @@ def createIrreg():
 
 
 @app.route('/createZones', methods=['POST'])
-def createZones():
+def createZones() -> str:
+    """
+    Create final zones with selected number of classes.
+
+    Returns:
+        Rendered displayZones.html template.
+    """
     result = session['result']
     classes = int(request.form['classes'])
     
-    # Regenerate with selected number of classes
     x = np.array(session['x'])
     y = np.array(session['y'])
     z = np.array(session['z'])
@@ -250,45 +321,75 @@ def createZones():
     
     if field_type == 1:
         row_spacing = session['row_spacing']
-        final_result = mz_api.generate_zones(x, y, z, field_type, inp, row_spacing=row_spacing, num_classes=classes)
+        final_result = mz_api.generate_zones(
+            x, y, z, field_type, inp,
+            row_spacing=row_spacing,
+            num_classes=classes
+        )
     elif field_type == 2:
         pivot_spacing = session['pivot_spacing']
         pivot_length = session['pivot_length']
-        final_result = mz_api.generate_zones(x, y, z, field_type, inp, pivot_spacing=pivot_spacing, pivot_length=pivot_length, num_classes=classes)
+        final_result = mz_api.generate_zones(
+            x, y, z, field_type, inp,
+            pivot_spacing=pivot_spacing,
+            pivot_length=pivot_length,
+            num_classes=classes
+        )
     else:
         row_spacing = session['row_spacing']
-        final_result = mz_api.generate_zones(x, y, z, field_type, inp, row_spacing=row_spacing, num_classes=classes)
+        final_result = mz_api.generate_zones(
+            x, y, z, field_type, inp,
+            row_spacing=row_spacing,
+            num_classes=classes
+        )
     
     session['result']['zones'] = final_result['zones']
     session['result']['class_breaks'] = final_result['class_breaks']
     
-    return render_template('displayZones.html', 
-                           string={1: final_result['zones']},
-                           cmap_def=final_result['cmap_def'],
-                           cmap_sel=final_result['cmap_sel'],
-                           legend=final_result['legend'],
-                           field_type=field_type)
+    return render_template(
+        'displayZones.html',
+        string={1: final_result['zones']},
+        cmap_def=final_result['cmap_def'],
+        cmap_sel=final_result['cmap_sel'],
+        legend=final_result['legend'],
+        field_type=field_type
+    )
 
 
 @app.route('/sendFile', methods=['POST'])
-def sendFile():
+def sendFile() -> Response:
+    """
+    Export zones as GeoJSON or Shapefile.
+
+    Returns:
+        Flask Response with file download.
+    """
     result = session['result']
     zones = result['zones']
     
     if request.form['filetype'] == "Save as GeoJSON":
-        return Response(json_mod.dumps(zones),
-                        mimetype='application/json',
-                        headers={'Content-Disposition': 'attachment;filename=zones.geojson'})
+        return Response(
+            json_mod.dumps(zones),
+            mimetype='application/json',
+            headers={'Content-Disposition': 'attachment;filename=zones.geojson'}
+        )
     
-    # Export as Shapefile
     data = mz_api.export_zones(zones, format='shapefile')
-    return Response(data,
-                    mimetype='application/zip',
-                    headers={'Content-Disposition': 'attachment;filename=zones.zip'})
+    return Response(
+        data,
+        mimetype='application/zip',
+        headers={'Content-Disposition': 'attachment;filename=zones.zip'}
+    )
 
 
 @app.route('/simplify', methods=['GET'])
-def simplify_polys():
+def simplify_polys() -> dict:
+    """
+    Apply smoothing to zones.
+
+    Returns:
+        JSON response with simplified zones.
+    """
     result = session['result']
     zones = result['zones']
     row_spacing = result['row_spacing']
