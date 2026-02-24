@@ -8,7 +8,7 @@ import os
 import numpy as np
 import pytest
 
-import mz_api
+from src.zones import generate_zones, simplify_zones, compute_gvf, export_zones
 
 
 # ── Test data ──────────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ FIXTURE_Z = _Z_GRID.flatten()
 
 def test_generate_zones_rect():
     """Test rectangular field zone generation."""
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -48,7 +48,7 @@ def test_generate_zones_rect():
 
 def test_generate_zones_irreg():
     """Test irregular field zone generation."""
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -64,7 +64,7 @@ def test_generate_zones_irreg():
 
 def test_generate_zones_vri():
     """Test VRI (center-pivot) field zone generation."""
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -81,7 +81,7 @@ def test_generate_zones_vri():
 
 def test_compute_gvf():
     """Test GVF computation without full zone generation."""
-    gvf = mz_api.compute_gvf(
+    gvf = compute_gvf(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -99,7 +99,7 @@ def test_compute_gvf():
 def test_simplify_zones():
     """Test zone simplification."""
     # First generate zones
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -110,7 +110,7 @@ def test_simplify_zones():
     )
     
     # Then simplify
-    simplified = mz_api.simplify_zones(
+    simplified = simplify_zones(
         result['zones'],
         row_spacing=100,
         smooth=2
@@ -122,7 +122,7 @@ def test_simplify_zones():
 
 def test_export_geojson():
     """Test GeoJSON export."""
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -132,14 +132,14 @@ def test_export_geojson():
         num_classes=2
     )
     
-    exported = mz_api.export_zones(result['zones'], format='geojson')
+    exported = export_zones(result['zones'], format='geojson')
     parsed = json.loads(exported)
     assert parsed['type'] == 'FeatureCollection'
 
 
 def test_export_shapefile():
     """Test Shapefile export."""
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=FIXTURE_X,
         y=FIXTURE_Y,
         z=FIXTURE_Z,
@@ -149,7 +149,7 @@ def test_export_shapefile():
         num_classes=2
     )
     
-    exported = mz_api.export_zones(result['zones'], format='shapefile')
+    exported = export_zones(result['zones'], format='shapefile')
     assert exported[:2] == b'PK'  # ZIP magic bytes
 
 
@@ -158,7 +158,7 @@ def test_with_sample_data():
     test_csv = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'test.csv')
     x, y, z = np.loadtxt(test_csv, skiprows=1, delimiter=",", unpack=True)
     
-    result = mz_api.generate_zones(
+    result = generate_zones(
         x=x, y=y, z=z,
         field_type=1,
         in_projection='epsg:4326',
@@ -174,7 +174,7 @@ def test_with_sample_data():
 def test_error_handling_missing_params():
     """Test error handling for missing required parameters."""
     with pytest.raises(ValueError, match="row_spacing required"):
-        mz_api.generate_zones(
+        generate_zones(
             x=FIXTURE_X, y=FIXTURE_Y, z=FIXTURE_Z,
             field_type=1,
             in_projection='epsg:4326',
@@ -182,7 +182,7 @@ def test_error_handling_missing_params():
         )
     
     with pytest.raises(ValueError, match="pivot_spacing and pivot_length required"):
-        mz_api.generate_zones(
+        generate_zones(
             x=FIXTURE_X, y=FIXTURE_Y, z=FIXTURE_Z,
             field_type=2,
             in_projection='epsg:4326',
@@ -190,7 +190,7 @@ def test_error_handling_missing_params():
         )
     
     with pytest.raises(ValueError, match="compute_gvf only supports"):
-        mz_api.compute_gvf(
+        compute_gvf(
             x=FIXTURE_X, y=FIXTURE_Y, z=FIXTURE_Z,
             field_type=2,  # VRI not supported
             in_projection='epsg:4326',

@@ -1,9 +1,9 @@
 """
-Pure Python API for agricultural management zone generation.
+Zone generation service for agricultural management zone generation.
 Decoupled from Flask for use in modern SPA (Vue, etc.).
 
 Usage:
-    from mz_api import generate_zones
+    from src.zones import generate_zones
     
     result = generate_zones(
         x=[...], y=[...], z=[...],  # coordinates and values
@@ -32,7 +32,23 @@ import numpy as np
 import geopandas as gpd
 from shapely.geometry import shape
 
-import mz
+from src.geo import (
+    bound_json,
+    reproject_poly,
+    utmzone,
+    get_spacing,
+    grid_rect,
+    grid_irreg,
+    grid_circ,
+    interpolate_raster,
+    get_poly_stats,
+    gvf_array,
+    get_poly_jenks,
+    zones_to_geojson_fc_gdf,
+    json_color_codes,
+    json_legend,
+    simplify_polys,
+)
 
 
 def generate_zones(
@@ -78,20 +94,20 @@ def generate_zones(
     z = np.asarray(z, dtype=float)
     
     if boundary_geojson is None:
-        boundary = mz.bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
+        boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
     else:
         if isinstance(boundary_geojson, str):
             boundary = json.loads(boundary_geojson)
         else:
             boundary = boundary_geojson
     
-    boundary_shp = mz.reproject_poly(
+    boundary_shp = reproject_poly(
         shape(boundary['geometry']),
         in_projection=in_projection,
         out_projection='epsg:3857'
     )
-    utm_crs = mz.utmzone(boundary_shp)
-    boundary_utm = mz.reproject_poly(
+    utm_crs = utmzone(boundary_shp)
+    boundary_utm = reproject_poly(
         shape(boundary['geometry']),
         in_projection=in_projection,
         out_projection=utm_crs
@@ -100,32 +116,32 @@ def generate_zones(
     if field_type == 1:
         if row_spacing is None:
             raise ValueError("row_spacing required for rectangular fields")
-        row_space = mz.get_spacing(boundary_utm, row_spacing)
-        polys = mz.grid_rect(boundary_utm, row_space)
+        row_space = get_spacing(boundary_utm, row_spacing)
+        polys = grid_rect(boundary_utm, row_space)
     elif field_type == 2:
         if pivot_spacing is None or pivot_length is None:
             raise ValueError("pivot_spacing and pivot_length required for VRI fields")
         center = boundary_utm.centroid
-        polys = mz.grid_circ(pivot_spacing, pivot_length, center, boundary_utm)
+        polys = grid_circ(pivot_spacing, pivot_length, center, boundary_utm)
         row_space = 0
     elif field_type == 3:
         if row_spacing is None:
             raise ValueError("row_spacing required for irregular fields")
-        row_space = mz.get_spacing(boundary_utm, row_spacing)
-        polys = mz.grid_irreg(boundary_utm, None, row_space)
+        row_space = get_spacing(boundary_utm, row_spacing)
+        polys = grid_irreg(boundary_utm, None, row_space)
     else:
         raise ValueError(f"Invalid field_type: {field_type}")
     
-    array, raster_bounds = mz.interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
-    poly_stats, polys2 = mz.get_poly_stats(array, polys, raster_bounds)
-    gvf_arr = mz.gvf_array(poly_stats, 10)
+    array, raster_bounds = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
+    poly_stats, polys2 = get_poly_stats(array, polys, raster_bounds)
+    gvf_arr = gvf_array(poly_stats, 10)
     
     num_classes = min(num_classes, len(np.unique(poly_stats)))
-    poly_comb, class_breaks = mz.get_poly_jenks(poly_stats, polys2, num_classes)
-    zones_geojson = mz.zones_to_geojson_fc_gdf(poly_comb, class_breaks, inp=utm_crs)
+    poly_comb, class_breaks = get_poly_jenks(poly_stats, polys2, num_classes)
+    zones_geojson = zones_to_geojson_fc_gdf(poly_comb, class_breaks, inp=utm_crs)
     
-    cmap_def, cmap_sel = mz.json_color_codes(num_classes)
-    legend = mz.json_legend(class_breaks)
+    cmap_def, cmap_sel = json_color_codes(num_classes)
+    legend = json_legend(class_breaks)
     
     return {
         'zones': zones_geojson,
@@ -168,8 +184,8 @@ def simplify_zones(
         polys.append(geom)
         class_breaks.append(feat['properties'].get('values', ''))
     
-    new_polys = mz.simplify_polys(polys, row_spacing, smooth)
-    return mz.zones_to_geojson_fc_gdf(new_polys, class_breaks)
+    new_polys = simplify_polys(polys, row_spacing, smooth)
+    return zones_to_geojson_fc_gdf(new_polys, class_breaks)
 
 
 def compute_gvf(
@@ -200,31 +216,31 @@ def compute_gvf(
     y = np.asarray(y, dtype=float)
     z = np.asarray(z, dtype=float)
     
-    boundary = mz.bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
-    boundary_shp = mz.reproject_poly(
+    boundary = bound_json(x, y, geometry_type=field_type, in_projection=in_projection)
+    boundary_shp = reproject_poly(
         shape(boundary['geometry']),
         in_projection=in_projection,
         out_projection='epsg:3857'
     )
-    utm_crs = mz.utmzone(boundary_shp)
-    boundary_utm = mz.reproject_poly(
+    utm_crs = utmzone(boundary_shp)
+    boundary_utm = reproject_poly(
         shape(boundary['geometry']),
         in_projection=in_projection,
         out_projection=utm_crs
     )
     
     if field_type == 1:
-        row_space = mz.get_spacing(boundary_utm, row_spacing)
-        polys = mz.grid_rect(boundary_utm, row_space)
+        row_space = get_spacing(boundary_utm, row_spacing)
+        polys = grid_rect(boundary_utm, row_space)
     elif field_type == 3:
-        row_space = mz.get_spacing(boundary_utm, row_spacing)
-        polys = mz.grid_irreg(boundary_utm, None, row_space)
+        row_space = get_spacing(boundary_utm, row_spacing)
+        polys = grid_irreg(boundary_utm, None, row_space)
     else:
         raise ValueError("compute_gvf only supports rect (1) and irreg (3) field types")
     
-    array, raster_bounds = mz.interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
-    poly_stats, _ = mz.get_poly_stats(array, polys, raster_bounds)
-    return mz.gvf_array(poly_stats, 10)
+    array, raster_bounds = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
+    poly_stats, _ = get_poly_stats(array, polys, raster_bounds)
+    return gvf_array(poly_stats, 10)
 
 
 def export_zones(
