@@ -1,25 +1,19 @@
 """
 API blueprints for ezzone Flask application.
 
-This module contains:
-- main_bp: Routes for HTML page rendering
-- api_bp: Routes for JSON API endpoints
+This module provides pure JSON API endpoints for the Vue SPA frontend.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import uuid
-import zipfile
-import tempfile
 
 import numpy as np
 import pandas as pd
 from flask import (
     Blueprint,
-    render_template,
     request,
     Response,
     jsonify,
@@ -35,8 +29,6 @@ from src.zones import (
     export_zones,
 )
 
-
-main_bp = Blueprint('main', __name__)
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 
@@ -55,26 +47,45 @@ def _parse_column(df: pd.DataFrame, col_name: str) -> np.ndarray:
     return df[col_name].values
 
 
-# ==================== Main Routes ====================
+# ==================== Session Management ====================
 
-@main_bp.route('/')
-def index() -> str:
-    """Render the main index page."""
-    return render_template('index2.html')
-
-
-@main_bp.route('/upload', methods=['POST', 'GET'])
-def upload() -> str:
-    """Handle file upload and initialize session with point data."""
-    session['sid'] = str(uuid.uuid4())
+@api_bp.route('/session/init', methods=['POST'])
+def init_session():
+    """
+    Initialize a new session with uploaded data.
+    
+    Request JSON:
+        {
+            "file": file (multipart),
+            "columns": {"x": "X", "y": "Y", "z": "Z"},
+            "epsg": "4326",
+            "field_type": 1,
+            "units": "m",
+            "row_spacing": 100,
+            "pivot_spacing": 50,    // for VRI
+            "pivot_length": 500     // for VRI
+        }
+    
+    Returns:
+        JSON with session_id and initial boundary for drawing
+    """
+    session_id = str(uuid.uuid4())
+    session['sid'] = session_id
     
     test_file = os.path.join(current_app.root_path, 'static/test.csv')
     
-    fileup = request.files.get('file')
-    if fileup and allowed_file(fileup.filename):
-        filename = secure_filename(fileup.filename)
+    file = request.files.get('file')
+    columns = request.json.get('columns', {}) if request.is_json else {}
+    
+    # Parse X, Y, Z column names
+    x_col = columns.get('x', 'X')
+    y_col = columns.get('y', 'Y')
+    z_col = columns.get('z', 'Z')
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
         filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        fileup.save(filepath)
+        file.save(filepath)
         
         try:
             df = pd.read_csv(filepath, sep=None, engine='python')
@@ -83,115 +94,134 @@ def upload() -> str:
                 df = pd.read_csv(filepath)
             except Exception:
                 os.remove(filepath)
-                return render_template('badFile.html')
+                return jsonify({'error': 'Could not parse CSV file'}), 400
         
         os.remove(filepath)
         
-        x = _parse_column(df, request.form['X'])
-        y = _parse_column(df, request.form['Y'])
-        z = _parse_column(df, request.form['Z'])
+        x = _parse_column(df, x_col)
+        y = _parse_column(df, y_col)
+        z = _parse_column(df, z_col)
     else:
+        # Use test data
         x, y, z = np.loadtxt(test_file, skiprows=1, delimiter=",", unpack=True)
     
-    inp = f"epsg:{request.form['coord']}"
-    field_type = int(request.form['field'])
-    unit_type = request.form['units']
+    # Get parameters from request
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form.to_dict()
     
-    factor = 0.3048 if unit_type == 'f' else 1
+    epsg = data.get('epsg', '4326')
+    field_type = int(data.get('field_type', 1))
+    units = data.get('units', 'm')
+    in_projection = f'epsg:{epsg}'
     
+    factor = 0.3048 if units == 'f' else 1
+    
+    # Store in session
     session['x'] = x.tolist()
     session['y'] = y.tolist()
     session['z'] = z.tolist()
-    session['inp'] = inp
+    session['inp'] = in_projection
     session['field_type'] = field_type
     
-    if field_type == 1:
-        try:
-            row_spacing = float(request.form['row']) * factor
-        except ValueError:
-            return render_template('badParam.html')
+    # Field-specific parameters
+    if field_type == 1 or field_type == 3:
+        row_spacing = float(data.get('row_spacing', 100)) * factor
         session['row_spacing'] = row_spacing
         session['pivot_spacing'] = None
         session['pivot_length'] = None
-        
-        try:
-            json_bound = generate_zones(
-                x, y, z, field_type, inp,
-                row_spacing=row_spacing,
-                num_classes=3
-            )
-            boundary = json_bound['boundary']
-        except RuntimeError:
-            return render_template('badEpsg.html')
-        
-        return render_template('rect.html', string=boundary)
-    
     elif field_type == 2:
-        try:
-            pivot_spacing = float(request.form['spacing']) * factor
-            pivot_length = float(request.form['length']) * factor
-        except ValueError:
-            return render_template('badParam.html')
+        pivot_spacing = float(data.get('pivot_spacing', 50)) * factor
+        pivot_length = float(data.get('pivot_length', 500)) * factor
         session['pivot_spacing'] = pivot_spacing
         session['pivot_length'] = pivot_length
         session['row_spacing'] = None
-        
-        try:
-            json_bound = generate_zones(
-                x, y, z, field_type, inp,
-                pivot_spacing=pivot_spacing,
-                pivot_length=pivot_length,
-                num_classes=3
-            )
-            boundary = json_bound['boundary']
-        except RuntimeError:
-            return render_template('badEpsg.html')
-        
-        return render_template('vri.html', string=boundary)
     
-    elif field_type == 3:
-        try:
-            row_spacing = float(request.form['row']) * factor
-        except ValueError:
-            return render_template('badParam.html')
-        session['row_spacing'] = row_spacing
-        session['pivot_spacing'] = None
-        session['pivot_length'] = None
-        
-        try:
-            json_bound = generate_zones(
-                x, y, z, field_type, inp,
-                row_spacing=row_spacing,
-                num_classes=3
-            )
-            boundary = json_bound['boundary']
-        except RuntimeError:
-            return render_template('badEpsg.html')
-        
-        return render_template('irreg.html', string=boundary)
-    
-    return render_template('badFile.html')
+    # Generate initial boundary for display
+    try:
+        result = generate_zones(
+            x, y, z, field_type, in_projection,
+            row_spacing=session.get('row_spacing'),
+            pivot_spacing=session.get('pivot_spacing'),
+            pivot_length=session.get('pivot_length'),
+            num_classes=3
+        )
+        return jsonify({
+            'session_id': session_id,
+            'boundary': result['boundary'],
+            'field_type': field_type,
+            'grid_stats': result['grid_stats']
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-@main_bp.route('/createRect', methods=['POST'])
-def create_rect() -> str:
-    """Create zones for rectangular field."""
+# ==================== Zone Generation ====================
+
+@api_bp.route('/zones/generate', methods=['POST'])
+def create_zones():
+    """
+    Generate zones with boundary drawn by user.
+    
+    Request JSON:
+        {
+            "boundary_geojson": {...},
+            "num_classes": 10
+        }
+    
+    Returns:
+        JSON with zones, gvf, class_breaks for chart display
+    """
     x = np.array(session.get('x', []))
     y = np.array(session.get('y', []))
     z = np.array(session.get('z', []))
     inp = session.get('inp')
-    row_spacing = session.get('row_spacing')
-    content = str(request.form.get('jsonval', '{}'))
+    field_type = session.get('field_type')
     
-    result = generate_zones(
-        x, y, z,
-        field_type=1,
-        in_projection=inp,
-        row_spacing=row_spacing,
-        boundary_geojson=content,
-        num_classes=10
-    )
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form.to_dict()
     
+    boundary_geojson = data.get('boundary_geojson')
+    num_classes = int(data.get('num_classes', 10))
+    
+    # Get field-specific parameters
+    if field_type == 1:
+        row_spacing = session.get('row_spacing')
+        result = generate_zones(
+            x, y, z,
+            field_type=field_type,
+            in_projection=inp,
+            row_spacing=row_spacing,
+            boundary_geojson=boundary_geojson,
+            num_classes=num_classes
+        )
+    elif field_type == 2:
+        pivot_spacing = session.get('pivot_spacing')
+        pivot_length = session.get('pivot_length')
+        result = generate_zones(
+            x, y, z,
+            field_type=field_type,
+            in_projection=inp,
+            pivot_spacing=pivot_spacing,
+            pivot_length=pivot_length,
+            boundary_geojson=boundary_geojson,
+            num_classes=num_classes
+        )
+    else:
+        row_spacing = session.get('row_spacing')
+        result = generate_zones(
+            x, y, z,
+            field_type=field_type,
+            in_projection=inp,
+            row_spacing=row_spacing,
+            boundary_geojson=boundary_geojson,
+            num_classes=num_classes
+        )
+    
+    # Store result in session for later use
     session['result'] = {
         'zones': result['zones'],
         'gvf': result['gvf'],
@@ -199,77 +229,34 @@ def create_rect() -> str:
         'row_spacing': result['grid_stats']['row_spacing']
     }
     
-    gvf_json = json.dumps(result['gvf'])
-    return render_template('chart.html', string=gvf_json)
-
-
-@main_bp.route('/createVri', methods=['POST'])
-def create_vri() -> str:
-    """Create zones for VRI (center-pivot) field."""
-    x = np.array(session.get('x', []))
-    y = np.array(session.get('y', []))
-    z = np.array(session.get('z', []))
-    inp = session.get('inp')
-    pivot_spacing = session.get('pivot_spacing')
-    pivot_length = session.get('pivot_length')
-    content = str(request.form.get('jsonval', '{}'))
-    
-    result = generate_zones(
-        x, y, z,
-        field_type=2,
-        in_projection=inp,
-        pivot_spacing=pivot_spacing,
-        pivot_length=pivot_length,
-        boundary_geojson=content,
-        num_classes=10
-    )
-    
-    session['result'] = {
+    return jsonify({
         'zones': result['zones'],
         'gvf': result['gvf'],
         'class_breaks': result['class_breaks'],
-        'row_spacing': 0
-    }
-    
-    gvf_json = json.dumps(result['gvf'])
-    return render_template('chart.html', string=gvf_json)
+        'legend': result.get('legend'),
+        'cmap_def': result.get('cmap_def')
+    })
 
 
-@main_bp.route('/createIrreg', methods=['POST'])
-def create_irreg() -> str:
-    """Create zones for irregular field."""
-    x = np.array(session.get('x', []))
-    y = np.array(session.get('y', []))
-    z = np.array(session.get('z', []))
-    inp = session.get('inp')
-    row_spacing = session.get('row_spacing')
-    content = str(request.form.get('jsonval', '{}'))
+@api_bp.route('/zones/finalize', methods=['POST'])
+def finalize_zones():
+    """
+    Create final zones with selected number of classes.
     
-    result = generate_zones(
-        x, y, z,
-        field_type=3,
-        in_projection=inp,
-        row_spacing=row_spacing,
-        boundary_geojson=content,
-        num_classes=10
-    )
+    Request JSON:
+        {
+            "num_classes": 3
+        }
     
-    session['result'] = {
-        'zones': result['zones'],
-        'gvf': result['gvf'],
-        'class_breaks': result['class_breaks'],
-        'row_spacing': result['grid_stats']['row_spacing']
-    }
+    Returns:
+        JSON with final zones, legend, color maps
+    """
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form.to_dict()
     
-    gvf_json = json.dumps(result['gvf'])
-    return render_template('chart.html', string=gvf_json)
-
-
-@main_bp.route('/createZones', methods=['POST'])
-def create_zones() -> str:
-    """Create final zones with selected number of classes."""
-    result = session.get('result', {})
-    classes = int(request.form.get('classes', 3))
+    num_classes = int(data.get('num_classes', 3))
     
     x = np.array(session.get('x', []))
     y = np.array(session.get('y', []))
@@ -277,12 +264,13 @@ def create_zones() -> str:
     inp = session.get('inp')
     field_type = session.get('field_type')
     
+    # Get field-specific parameters
     if field_type == 1:
         row_spacing = session.get('row_spacing')
         final_result = generate_zones(
             x, y, z, field_type, inp,
             row_spacing=row_spacing,
-            num_classes=classes
+            num_classes=num_classes
         )
     elif field_type == 2:
         pivot_spacing = session.get('pivot_spacing')
@@ -291,116 +279,39 @@ def create_zones() -> str:
             x, y, z, field_type, inp,
             pivot_spacing=pivot_spacing,
             pivot_length=pivot_length,
-            num_classes=classes
+            num_classes=num_classes
         )
     else:
         row_spacing = session.get('row_spacing')
         final_result = generate_zones(
             x, y, z, field_type, inp,
             row_spacing=row_spacing,
-            num_classes=classes
+            num_classes=num_classes
         )
     
-    session['result']['zones'] = final_result['zones']
-    session['result']['class_breaks'] = final_result['class_breaks']
+    # Update session
+    session['result'] = {
+        'zones': final_result['zones'],
+        'gvf': session.get('result', {}).get('gvf', []),
+        'class_breaks': final_result['class_breaks'],
+        'row_spacing': final_result['grid_stats']['row_spacing']
+    }
     
-    return render_template(
-        'displayZones.html',
-        string={1: final_result['zones']},
-        cmap_def=final_result['cmap_def'],
-        cmap_sel=final_result['cmap_sel'],
-        legend=final_result['legend'],
-        field_type=field_type
-    )
+    return jsonify({
+        'zones': final_result['zones'],
+        'class_breaks': final_result['class_breaks'],
+        'legend': final_result['legend'],
+        'cmap_def': final_result['cmap_def'],
+        'cmap_sel': final_result['cmap_sel']
+    })
 
 
-@main_bp.route('/sendFile', methods=['POST'])
-def send_file() -> Response:
-    """Export zones as GeoJSON or Shapefile."""
-    result = session.get('result', {})
-    zones = result.get('zones', {})
-    
-    if request.form.get('filetype') == "Save as GeoJSON":
-        return Response(
-            json.dumps(zones),
-            mimetype='application/json',
-            headers={'Content-Disposition': 'attachment;filename=zones.geojson'}
-        )
-    
-    data = export_zones(zones, format='shapefile')
-    return Response(
-        data,
-        mimetype='application/zip',
-        headers={'Content-Disposition': 'attachment;filename=zones.zip'}
-    )
-
-
-@main_bp.route('/simplify', methods=['GET'])
-def simplify_polys() -> dict:
-    """Apply smoothing to zones."""
-    result = session.get('result', {})
-    zones = result.get('zones', {})
-    row_spacing = result.get('row_spacing', 0)
-    smooth = request.args.get('smooth', 1, type=int)
-    
-    simplified = simplify_zones(zones, row_spacing, smooth)
-    return jsonify(result=simplified)
-
-
-# ==================== JSON API Routes ====================
-
-@api_bp.route('/zones', methods=['POST'])
-def api_generate_zones() -> dict:
-    """
-    Generate zones via JSON API.
-    
-    Request JSON:
-        {
-            "x": [...],
-            "y": [...],
-            "z": [...],
-            "field_type": 1,  // 1=rect, 2=VRI, 3=irreg
-            "in_projection": "epsg:4326",
-            "row_spacing": 100,      // for rect/irreg
-            "pivot_spacing": 50,     // for VRI
-            "pivot_length": 500,     // for VRI
-            "boundary_geojson": {...}, // optional
-            "num_classes": 3
-        }
-    
-    Returns:
-        JSON response with zones, gvf, class_breaks, boundary, legend, etc.
-    """
-    data = request.get_json()
-    
-    x = np.array(data.get('x', []))
-    y = np.array(data.get('y', []))
-    z = np.array(data.get('z', []))
-    
-    try:
-        result = generate_zones(
-            x=x,
-            y=y,
-            z=z,
-            field_type=data.get('field_type', 1),
-            in_projection=data.get('in_projection', 'epsg:4326'),
-            row_spacing=data.get('row_spacing'),
-            pivot_spacing=data.get('pivot_spacing'),
-            pivot_length=data.get('pivot_length'),
-            boundary_geojson=data.get('boundary_geojson'),
-            num_classes=data.get('num_classes', 3)
-        )
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': f'Zone generation failed: {str(e)}'}), 500
-
+# ==================== GVF Computation ====================
 
 @api_bp.route('/zones/gvf', methods=['POST'])
-def api_compute_gvf() -> dict:
+def api_compute_gvf():
     """
-    Compute GVF values via JSON API.
+    Compute GVF values for analysis.
     
     Request JSON:
         {
@@ -413,7 +324,7 @@ def api_compute_gvf() -> dict:
         }
     
     Returns:
-        JSON response with GVF array.
+        JSON with GVF array
     """
     data = request.get_json()
     
@@ -437,51 +348,64 @@ def api_compute_gvf() -> dict:
         return jsonify({'error': f'GVF computation failed: {str(e)}'}), 500
 
 
+# ==================== Zone Simplification ====================
+
 @api_bp.route('/zones/simplify', methods=['POST'])
-def api_simplify_zones() -> dict:
+def api_simplify_zones():
     """
-    Simplify zones via JSON API.
+    Simplify zones.
     
     Request JSON:
         {
-            "zones": {...},    // GeoJSON FeatureCollection
-            "row_spacing": 100,
-            "smooth": 1
+            "smooth": 1-10
         }
     
     Returns:
-        JSON response with simplified GeoJSON.
+        JSON with simplified GeoJSON
     """
-    data = request.get_json()
+    result = session.get('result', {})
+    zones = result.get('zones', {})
+    row_spacing = result.get('row_spacing', 0)
     
-    zones = data.get('zones', {})
-    row_spacing = data.get('row_spacing', 0)
-    smooth = data.get('smooth', 1)
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form.to_dict()
+    
+    smooth = int(data.get('smooth', 1))
     
     try:
         simplified = simplify_zones(zones, row_spacing, smooth)
+        # Update session
+        session['result']['zones'] = simplified
         return jsonify({'zones': simplified})
     except Exception as e:
         return jsonify({'error': f'Simplification failed: {str(e)}'}), 500
 
 
-@api_bp.route('/zones/export', methods=['POST'])
-def api_export_zones() -> Response:
+# ==================== Export ====================
+
+@api_bp.route('/export', methods=['POST'])
+def api_export():
     """
-    Export zones via JSON API.
+    Export zones to file.
     
     Request JSON:
         {
-            "zones": {...},    // GeoJSON FeatureCollection
-            "format": "geojson" // or "shapefile"
+            "format": "geojson" | "shapefile"
         }
     
     Returns:
-        File download response.
+        File download response
     """
-    data = request.get_json()
+    result = session.get('result', {})
+    zones = result.get('zones', {})
     
-    zones = data.get('zones', {})
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form.to_dict()
+    
     format_type = data.get('format', 'geojson')
     
     try:
@@ -498,7 +422,13 @@ def api_export_zones() -> Response:
                 mimetype='application/zip',
                 headers={'Content-Disposition': 'attachment;filename=zones.zip'}
             )
-    except ValueError as e:
-        return Response(str(e), status=400)
     except Exception as e:
         return Response(f'Export failed: {str(e)}', status=500)
+
+
+# ==================== Health Check ====================
+
+@api_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({'status': 'ok'})

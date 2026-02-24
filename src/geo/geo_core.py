@@ -26,8 +26,14 @@ from jenkspy import jenks_breaks as jenks
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from osgeo import gdal
-from osgeo import osr
+try:
+    from osgeo import gdal
+    from osgeo import osr
+    HAS_GDAL = True
+except ImportError:
+    HAS_GDAL = False
+    gdal = None
+    osr = None
 
 
 def extrapolate_nans(x: np.ndarray, y: np.ndarray, v: np.ndarray) -> np.ndarray | None:
