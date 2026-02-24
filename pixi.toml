@@ -5,8 +5,6 @@ name = "ezzone-pyanywhere"
 platforms = ["win-64"]
 version = "0.1.0"
 
-[tasks]
-
 [dependencies]
 python = ">=3.11"
 flask = "*"
@@ -20,7 +18,28 @@ geojson = "*"
 jenkspy = "*"
 geopandas = "*"
 matplotlib = "*"
-gdal = "*"
 werkzeug = "*"
 python-dotenv = "*"
 pytest = "*"
+
+[tasks]
+# Frontend
+install-fe = "npm install"
+build = "npm run build"
+dev-fe = { cmd = ["npm", "run", "dev"], cwd = "." }
+preview = "npm run preview"
+
+# Backend
+dev-be = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--reload", "--debug"], cwd = "." }
+serve = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--port", "5000"], cwd = "." }
+
+# Full Stack
+dev = { depends-on = ["dev-fe", "dev-be"] }
+start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run"] }
+
+# Testing
+test = "pytest tests/"
+test-cov = "pytest tests/ --cov=src --cov-report=html"
+
+# Utilities
+clean = "rmdir /s /q dist"

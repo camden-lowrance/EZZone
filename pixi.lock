@@ -43,7 +43,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fonttools-4.61.1-pyh7db6752_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/freetype-2.14.1-h57928b3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/freexl-2.0.0-hf297d47_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/gdal-3.12.2-py314h589ebb0_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/geojson-3.2.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/geopandas-1.1.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/geopandas-base-1.1.2-pyha770c72_0.conda
@@ -590,21 +589,6 @@ packages:
   license_family: MOZILLA
   size: 77528
   timestamp: 1734015193826
-- conda: https://conda.anaconda.org/conda-forge/win-64/gdal-3.12.2-py314h589ebb0_1.conda
-  sha256: 98aa642816671e26f63af39b6660bb49f4873e6edde67fa8653a0f02585f8ce2
-  md5: 9e3003c86e83f477f4a57dd9acbff0c6
-  depends:
-  - libgdal-core 3.12.2.*
-  - numpy >=1.23,<3
-  - python >=3.14,<3.15.0a0
-  - python_abi 3.14.* *_cp314
-  - ucrt >=10.0.20348.0
-  - vc >=14.3,<15
-  - vc14_runtime >=14.44.35208
-  license: MIT
-  license_family: MIT
-  size: 1749606
-  timestamp: 1771395703926
 - conda: https://conda.anaconda.org/conda-forge/noarch/geojson-3.2.0-pyhd8ed1ab_0.conda
   sha256: bfa3b5159e6696872586b2154ff9956e7e81d86d85a6a5601d25b26ca2bb916d
   md5: 9f9840fb1c2e009fb0009a2f9461e64a
