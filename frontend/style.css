@@ -139,11 +139,6 @@ h4 { font-size: 1rem; }
   background: #00a06e;
 }
 
-.btn-danger {
-  background: var(--accent-red);
-  color: white;
-}
-
 .btn-large {
   padding: var(--space-md) var(--space-lg);
   font-size: 1rem;
@@ -187,29 +182,6 @@ h4 { font-size: 1rem; }
 
 .form-input::placeholder {
   color: var(--text-muted);
-}
-
-/* Radio & Checkbox */
-.radio-group,
-.checkbox-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.radio-option,
-.checkbox-option {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  cursor: pointer;
-}
-
-.radio-option input,
-.checkbox-option input {
-  accent-color: var(--accent-primary);
-  width: 16px;
-  height: 16px;
 }
 
 /* File Upload */
@@ -290,69 +262,6 @@ h4 { font-size: 1rem; }
   z-index: 1000;
 }
 
-/* Tooltips */
-.tooltip {
-  position: relative;
-}
-
-.tooltip::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition-fast);
-}
-
-.tooltip:hover::after {
-  opacity: 1;
-}
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: var(--space-xs);
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: var(--space-md);
-}
-
-.tab {
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  cursor: pointer;
-  position: relative;
-  transition: color var(--transition-fast);
-}
-
-.tab:hover {
-  color: var(--text-primary);
-}
-
-.tab.active {
-  color: var(--accent-primary);
-}
-
-.tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--accent-primary);
-}
-
 /* Alerts */
 .alert {
   padding: var(--space-md);
@@ -386,10 +295,9 @@ h4 { font-size: 1rem; }
 
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
-.grid-4 { grid-template-columns: repeat(4, 1fr); }
 
 @media (max-width: 768px) {
-  .grid-2, .grid-3, .grid-4 {
+  .grid-2, .grid-3 {
     grid-template-columns: 1fr;
   }
 }

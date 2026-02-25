@@ -231,7 +231,7 @@ function handleDeleteClick(e) {
   if (drawMode.value !== 'delete') return
   map.forEachFeatureAtPixel(e.pixel, (feature) => {
     boundarySource.removeFeature(feature)
-    store.setBoundary(null)
+    store.results.boundary = null
     return true // stop after first hit
   })
 }

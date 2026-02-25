@@ -65,7 +65,7 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None) -> tuple[gpd.GeoDat
         gdf.set_crs('epsg:4326', inplace=True)
     
     # Identify Z column
-    z_col = z_col_req if z_col_req in gdf.columns else _detect_z_col(gdf, exclude=list(gdf.geometry.name))
+    z_col = z_col_req if z_col_req in gdf.columns else _detect_z_col(gdf, exclude=[gdf.geometry.name])
     if not z_col:
         raise ValueError('No numeric data column found.')
 

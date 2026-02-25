@@ -187,10 +187,7 @@ const chartOptions = {
   }
 }
 
-const classBreakTable = computed(() => {
-  if (!store.results.classBreaks.length) return []
-  return store.results.classBreaks
-})
+const classBreakTable = computed(() => store.results.classBreaks)
 
 onMounted(() => {
   initMap()

@@ -50,11 +50,9 @@ frontend/
     └── FinalizeView.vue       # Step 4: Export (GeoJSON/Shapefile)
 
 tests/
-├── test_mz_api.py                  # Core algorithm unit tests
-├── test_integration.py             # Flask end-to-end tests
-├── test_fast_polygonization.py     # Polygonization tests
-├── test_polygonization_summary.py  # Polygonization edge cases
-└── fixtures/                       # Real-world CSV datasets
+├── test_mz_api.py             # Core algorithm unit tests
+├── test_integration.py        # Flask end-to-end tests
+└── fixtures/test.csv          # Sample dataset
 ```
 
 ## Architecture

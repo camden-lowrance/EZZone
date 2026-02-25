@@ -10,17 +10,15 @@ import json
 import os
 
 import numpy as np
-import geojson
 import pytest
-
-from cachelib.file import FileSystemCache
+from diskcache import Cache
 
 from src.app import create_app
 from src.geo import bound_json
 
 
 # ── Small fixture dataset ──────────────────────────────────────────────────────
-# 10×10 WGS-84 grid near the real test.csv field (UK); deterministic gradient Z.
+# 10x10 WGS-84 grid near the real test.csv field (UK); deterministic gradient Z.
 
 _LONS = np.linspace(-0.460, -0.450, 10)
 _LATS = np.linspace(52.070, 52.080, 10)
@@ -49,20 +47,12 @@ def fixture_csv(tmp_path):
 
 @pytest.fixture()
 def app(tmp_path):
-    """
-    Configure the Flask app for testing:
-    - TESTING mode (propagates exceptions instead of 500 pages)
-    - UPLOAD_FOLDER redirected to tmp_path so test state files are isolated
-    """
+    """Configure the Flask app for testing."""
     application = create_app(test_config={
         'TESTING': True,
         'UPLOAD_FOLDER': str(tmp_path),
+        'CACHE_FOLDER': str(tmp_path / 'cache'),
         'SECRET_KEY': 'test-secret',
-        'SESSION_TYPE': 'cachelib',
-        'SESSION_CACHELIB': FileSystemCache(
-            cache_dir=str(tmp_path / 'sessions'),
-            threshold=500,
-        ),
     })
     yield application
 
@@ -76,24 +66,18 @@ def client(app):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _make_fc(x, y, geometry_type):
-    """
-    Build a GeoJSON FeatureCollection in EPSG:4326 wrapping the field boundary.
-    """
+def _make_fc(x, y):
+    """Build a GeoJSON FeatureCollection in EPSG:4326 wrapping the field boundary."""
     x_arr, y_arr = np.asarray(x, float), np.asarray(y, float)
-    if geometry_type == 1:
-        coords = [[[x_arr.min(), y_arr.min()], [x_arr.max(), y_arr.min()],
-                    [x_arr.max(), y_arr.max()], [x_arr.min(), y_arr.max()],
-                    [x_arr.min(), y_arr.min()]]]
-        poly = {'type': 'Polygon', 'coordinates': coords}
-    else:
-        poly = bound_json(
-            x=x_arr, y=y_arr,
-            geometry_type=geometry_type,
-            in_projection='epsg:4326',
-            out_projection='epsg:4326',
-        )
-    return geojson.dumps(geojson.FeatureCollection([geojson.Feature(geometry=poly)]))
+    poly = bound_json(
+        x=x_arr, y=y_arr,
+        in_projection='epsg:4326',
+        out_projection='epsg:4326',
+    )
+    return json.dumps({
+        'type': 'FeatureCollection',
+        'features': [{'type': 'Feature', 'geometry': poly, 'properties': {}}],
+    })
 
 
 # A minimal valid GeoJSON FeatureCollection for export tests.
@@ -120,7 +104,6 @@ def test_index(client):
     """Root serves the Vue SPA index.html."""
     r = client.get('/')
     # May be 200 if index.html exists, or 404/500 if not built yet
-    # Just verify the route is registered
     assert r.status_code in (200, 404)
 
 
@@ -135,11 +118,10 @@ def test_health(client):
 def test_session_init_demo(client):
     """Demo mode (no file) should initialise session and return boundary."""
     r = client.post('/api/session/init',
-                    data={'epsg': '4326', 'field_type': '1', 'units': 'm', 'row_spacing': '100'},
                     content_type='multipart/form-data')
     assert r.status_code == 200, f"demo init failed: {r.data[:500]}"
     body = r.get_json()
-    assert 'session_id' in body
+    assert 'data_id' in body
     assert 'boundary' in body
 
 
@@ -148,98 +130,48 @@ def test_session_init_with_file(client, fixture_csv):
     with open(fixture_csv, 'rb') as f:
         r = client.post('/api/session/init', data={
             'file': (f, 'field.csv'),
-            'epsg': '4326',
-            'field_type': '1',
-            'units': 'm',
-            'row_spacing': '100',
         }, content_type='multipart/form-data')
     assert r.status_code == 200
     body = r.get_json()
-    assert 'session_id' in body
+    assert 'data_id' in body
     assert 'boundary' in body
 
 
-def test_session_init_irreg(client):
-    """Demo mode with field_type=3 (irregular)."""
-    r = client.post('/api/session/init',
-                    data={'epsg': '4326', 'field_type': '3', 'units': 'm', 'row_spacing': '100'},
-                    content_type='multipart/form-data')
-    assert r.status_code == 200
-    body = r.get_json()
-    assert 'boundary' in body
+# ── Full pipeline ─────────────────────────────────────────────────────────────
 
-
-# ── Full pipeline: rectangular field ──────────────────────────────────────────
-
-def test_pipeline_rect(client, fixture_csv):
+def test_pipeline(client, fixture_csv):
     """
-    Full round-trip for a rectangular-grid field:
-      /api/session/init → /api/zones/generate → /api/zones/finalize
+    Full round-trip:
+      /api/session/init -> /api/zones/generate
     """
     # 1. Init session with file
     with open(fixture_csv, 'rb') as f:
         r = client.post('/api/session/init', data={
             'file': (f, 'field.csv'),
-            'epsg': '4326',
-            'field_type': '1',
-            'units': 'm',
-            'row_spacing': '100',
         }, content_type='multipart/form-data')
     assert r.status_code == 200, f"init failed:\n{r.data[:500]}"
+    init = r.get_json()
+    data_id = init['data_id']
 
     # 2. Generate zones with boundary
-    fc_json = _make_fc(FIXTURE_X, FIXTURE_Y, geometry_type=1)
+    fc_json = _make_fc(FIXTURE_X, FIXTURE_Y)
     r = client.post('/api/zones/generate',
-                    json={'boundary_geojson': fc_json, 'num_classes': 10})
+                    json={'data_id': data_id, 'boundary_geojson': fc_json, 'num_classes': 3})
     assert r.status_code == 200, f"generate failed:\n{r.data[:500]}"
     body = r.get_json()
     assert 'zones' in body
     assert 'gvf' in body
 
-    # 3. Finalize with chosen number of classes
-    r = client.post('/api/zones/finalize', json={'num_classes': 3})
-    assert r.status_code == 200, f"finalize failed:\n{r.data[:500]}"
-    body = r.get_json()
-    assert 'zones' in body
-    assert body['zones']['type'] == 'FeatureCollection'
 
+# ── Export tests ──────────────────────────────────────────────────────────────
 
-# ── Full pipeline: irregular field ────────────────────────────────────────────
-
-def test_pipeline_irreg(client, fixture_csv):
-    """
-    Round-trip for an irregular-grid field:
-      /api/session/init → /api/zones/generate
-    """
-    # 1. Init session
-    with open(fixture_csv, 'rb') as f:
-        r = client.post('/api/session/init', data={
-            'file': (f, 'field.csv'),
-            'epsg': '4326',
-            'field_type': '3',
-            'units': 'm',
-            'row_spacing': '100',
-        }, content_type='multipart/form-data')
-    assert r.status_code == 200
-
-    # 2. Generate zones
-    fc_json = _make_fc(FIXTURE_X, FIXTURE_Y, geometry_type=3)
-    r = client.post('/api/zones/generate',
-                    json={'boundary_geojson': fc_json, 'num_classes': 2})
-    assert r.status_code == 200, f"generate failed:\n{r.data[:500]}"
-    body = r.get_json()
-    assert 'zones' in body
-
-
-# ── Export: both output formats ───────────────────────────────────────────────
-
-def test_export_geojson(client):
+def test_export_geojson(client, app):
     """GeoJSON export: correct mimetype and valid JSON body."""
-    # Seed session with minimal result
-    with client.session_transaction() as sess:
-        sess['result'] = {'zones': _MINIMAL_FC, 'gvf': [], 'class_breaks': [], 'row_spacing': 100}
+    # Seed diskcache with minimal result
+    with Cache(app.config['CACHE_FOLDER']) as cache:
+        cache.set('zones_test-export', _MINIMAL_FC, expire=3600)
 
-    r = client.post('/api/export', json={'format': 'geojson'})
+    r = client.post('/api/export', json={'data_id': 'test-export', 'format': 'geojson'})
     assert r.status_code == 200
     assert r.mimetype == 'application/json'
     assert r.headers['Content-Disposition'] == 'attachment;filename=zones.geojson'
@@ -247,12 +179,12 @@ def test_export_geojson(client):
     assert parsed['type'] == 'FeatureCollection'
 
 
-def test_export_shapefile(client):
+def test_export_shapefile(client, app):
     """Shapefile ZIP export: correct mimetype and valid ZIP."""
-    with client.session_transaction() as sess:
-        sess['result'] = {'zones': _MINIMAL_FC, 'gvf': [], 'class_breaks': [], 'row_spacing': 100}
+    with Cache(app.config['CACHE_FOLDER']) as cache:
+        cache.set('zones_test-export-shp', _MINIMAL_FC, expire=3600)
 
-    r = client.post('/api/export', json={'format': 'shapefile'})
+    r = client.post('/api/export', json={'data_id': 'test-export-shp', 'format': 'shapefile'})
     assert r.status_code == 200
     assert r.mimetype == 'application/zip'
     assert r.headers['Content-Disposition'] == 'attachment;filename=zones.zip'
@@ -269,36 +201,33 @@ def test_export_shapefile(client):
 def test_full_browser_flow(client, fixture_csv):
     """
     Simulate the exact sequence of API calls the Vue SPA makes:
-      1. POST /api/session/init  (HomeView → "Use Sample Data")
-      2. POST /api/zones/generate (DrawBoundaryView → "Generate Zones")
-      3. POST /api/zones/finalize (ZonesView → "Finalize Zones")
-      4. POST /api/export         (FinalizeView → "Export GeoJSON")
+      1. POST /api/session/init  (HomeView -> "Use Sample Data")
+      2. POST /api/zones/generate (DrawBoundaryView -> "Generate Zones")
+      3. POST /api/zones/generate (ZonesView -> change num_classes)
+      4. POST /api/export         (FinalizeView -> "Export GeoJSON")
 
     At each step, assert the response shape matches what the store expects.
     """
-    # ── Step 1: init session (sample data, no file) ───────────────────────
+    # Step 1: init session (sample data, no file)
     r = client.post('/api/session/init',
-                    data={'epsg': '4326', 'field_type': '1',
-                          'units': 'm', 'row_spacing': '100'},
                     content_type='multipart/form-data')
     assert r.status_code == 200, f"init failed: {r.data[:500]}"
     init = r.get_json()
 
-    # Store expects: session_id, boundary, grid_stats
-    assert 'session_id' in init
+    # Store expects: data_id, boundary, grid_stats
+    assert 'data_id' in init
     assert 'boundary' in init
     assert 'grid_stats' in init
+    data_id = init['data_id']
     boundary = init['boundary']
 
     # Boundary should be valid GeoJSON with coordinates
-    assert boundary.get('type') == 'Polygon' or \
-           boundary.get('type') == 'Feature' or \
-           (boundary.get('type') == 'FeatureCollection'), \
-           f"Unexpected boundary type: {boundary.get('type')}"
+    assert boundary.get('type') in ('Polygon', 'Feature', 'FeatureCollection'), \
+        f"Unexpected boundary type: {boundary.get('type')}"
 
-    # ── Step 2: generate zones (send boundary back) ───────────────────────
+    # Step 2: generate zones (send boundary back)
     r = client.post('/api/zones/generate',
-                    json={'boundary_geojson': boundary, 'num_classes': 10})
+                    json={'data_id': data_id, 'boundary_geojson': boundary, 'num_classes': 10})
     assert r.status_code == 200, f"generate failed: {r.data[:500]}"
     gen = r.get_json()
 
@@ -313,8 +242,7 @@ def test_full_browser_flow(client, fixture_csv):
     assert zones['type'] == 'FeatureCollection', f"zones type: {zones.get('type')}"
     assert len(zones['features']) > 0, "zones has no features"
 
-    # Each feature should have a 'zone' property (used by style function)
-    # and a non-null geometry (otherwise OL can't render it)
+    # Each feature should have a 'zone' property
     for i, feat in enumerate(zones['features']):
         assert 'zone' in feat.get('properties', {}), \
             f"Feature {i} missing 'zone' property: {feat.get('properties')}"
@@ -343,20 +271,19 @@ def test_full_browser_flow(client, fixture_csv):
         assert item[0].startswith('#'), f"Legend color should be hex, got {item[0]}"
         assert isinstance(item[1], str), f"Legend label should be str, got {item[1]}"
 
-    # ── Step 3: finalize zones ────────────────────────────────────────────
-    r = client.post('/api/zones/finalize', json={'num_classes': 3})
-    assert r.status_code == 200, f"finalize failed: {r.data[:500]}"
+    # Step 3: re-generate with different num_classes (what ZonesView does)
+    r = client.post('/api/zones/generate',
+                    json={'data_id': data_id, 'boundary_geojson': boundary, 'num_classes': 3})
+    assert r.status_code == 200, f"re-generate failed: {r.data[:500]}"
     fin = r.get_json()
-
-    # Store expects: zones, class_breaks, legend
     assert 'zones' in fin
     assert fin['zones']['type'] == 'FeatureCollection'
     assert len(fin['zones']['features']) > 0
     assert 'class_breaks' in fin
     assert 'legend' in fin
 
-    # ── Step 4: export GeoJSON ────────────────────────────────────────────
-    r = client.post('/api/export', json={'format': 'geojson'})
+    # Step 4: export GeoJSON
+    r = client.post('/api/export', json={'data_id': data_id, 'format': 'geojson'})
     assert r.status_code == 200, f"export failed: {r.data[:500]}"
     exported = json.loads(r.data)
     assert exported['type'] == 'FeatureCollection'

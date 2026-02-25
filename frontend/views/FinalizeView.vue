@@ -149,8 +149,7 @@ const classDistribution = computed(() => {
     const cls = f.properties?.zone || 1
     counts[cls] = (counts[cls] || 0) + 1
   })
-  
-  const max = Math.max(...Object.values(counts), 1)
+
   const result = []
   for (let i = 1; i <= numClasses.value; i++) {
     result.push(counts[i] || 0)

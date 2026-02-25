@@ -93,9 +93,7 @@ const isDragging = ref(false)
 const fileInput = ref(null)
 const selectedFile = ref(null)
 
-const canContinue = computed(() => {
-  return selectedFile.value || store.dataId === 'sample' // simplified check
-})
+const canContinue = computed(() => !!selectedFile.value)
 
 function handleDrop(e) {
   isDragging.value = false
