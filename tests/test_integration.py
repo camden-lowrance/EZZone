@@ -13,6 +13,8 @@ import numpy as np
 import geojson
 import pytest
 
+from cachelib.file import FileSystemCache
+
 from src.app import create_app
 from src.geo import bound_json
 
@@ -56,6 +58,11 @@ def app(tmp_path):
         'TESTING': True,
         'UPLOAD_FOLDER': str(tmp_path),
         'SECRET_KEY': 'test-secret',
+        'SESSION_TYPE': 'cachelib',
+        'SESSION_CACHELIB': FileSystemCache(
+            cache_dir=str(tmp_path / 'sessions'),
+            threshold=500,
+        ),
     })
     yield application
 

@@ -19,6 +19,7 @@ jenkspy = "*"
 geopandas = "*"
 matplotlib = "*"
 werkzeug = "*"
+flask-session = "*"
 python-dotenv = "*"
 pytest = "*"
 
