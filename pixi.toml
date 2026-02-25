@@ -6,41 +6,42 @@ platforms = ["win-64"]
 version = "0.1.0"
 
 [dependencies]
-python = ">=3.11"
-flask = "*"
-numpy = "*"
-pandas = "*"
-scipy = "*"
-pyproj = "*"
-shapely = "*"
-rasterstats = "*"
-geojson = "*"
-jenkspy = "*"
-geopandas = "*"
-matplotlib = "*"
-werkzeug = "*"
-flask-session = "*"
-python-dotenv = "*"
-pytest = "*"
+python = "3.14.3"
+flask = "3.1.3"
+numpy = "2.4.2"
+pandas = "3.0.1"
+scipy = "1.17.1"
+pyproj = "3.7.2"
+shapely = "2.1.2"
+rasterio = "1.5.0"
+gdal = "3.12.2"
+geojson = "3.2.0"
+jenkspy = "0.4.1"
+geopandas = "1.1.2"
+matplotlib = "3.10.8"
+werkzeug = "3.1.6"
+flask-session = "0.8.0"
+python-dotenv = "1.2.1"
+pytest = "9.0.2"
 
 [tasks]
 # Frontend
 install-fe = "npm install"
 build = "npm run build"
-dev-fe = { cmd = ["npm", "run", "dev"], cwd = "." }
+dev-fe = { cmd = ["npm", "run", "dev"], cwd = "frontend" }
 preview = "npm run preview"
 
 # Backend
-dev-be = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--reload", "--debug"], cwd = "." }
-serve = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--port", "5000"], cwd = "." }
+dev-be = { cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run", "--reload", "--debug"], cwd = "." }
+serve = { cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run", "--port", "5000"], cwd = "." }
 
 # Full Stack
 dev = { depends-on = ["dev-fe", "dev-be"] }
-start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run"] }
+start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run"] }
 
 # Testing
 test = "pytest tests/"
-test-cov = "pytest tests/ --cov=src --cov-report=html"
+test-cov = "pytest tests/ --cov=backend.src --cov-report=html"
 
 # Utilities
 clean = "rmdir /s /q dist"

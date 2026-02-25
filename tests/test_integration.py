@@ -262,3 +262,101 @@ def test_export_shapefile(client):
         names = zf.namelist()
     assert any(n.endswith('.shp') for n in names), f"no .shp in zip: {names}"
     assert any(n.endswith('.dbf') for n in names), f"no .dbf in zip: {names}"
+
+
+# ── Full browser flow mock ────────────────────────────────────────────────────
+
+def test_full_browser_flow(client, fixture_csv):
+    """
+    Simulate the exact sequence of API calls the Vue SPA makes:
+      1. POST /api/session/init  (HomeView → "Use Sample Data")
+      2. POST /api/zones/generate (DrawBoundaryView → "Generate Zones")
+      3. POST /api/zones/finalize (ZonesView → "Finalize Zones")
+      4. POST /api/export         (FinalizeView → "Export GeoJSON")
+
+    At each step, assert the response shape matches what the store expects.
+    """
+    # ── Step 1: init session (sample data, no file) ───────────────────────
+    r = client.post('/api/session/init',
+                    data={'epsg': '4326', 'field_type': '1',
+                          'units': 'm', 'row_spacing': '100'},
+                    content_type='multipart/form-data')
+    assert r.status_code == 200, f"init failed: {r.data[:500]}"
+    init = r.get_json()
+
+    # Store expects: session_id, boundary, grid_stats
+    assert 'session_id' in init
+    assert 'boundary' in init
+    assert 'grid_stats' in init
+    boundary = init['boundary']
+
+    # Boundary should be valid GeoJSON with coordinates
+    assert boundary.get('type') == 'Polygon' or \
+           boundary.get('type') == 'Feature' or \
+           (boundary.get('type') == 'FeatureCollection'), \
+           f"Unexpected boundary type: {boundary.get('type')}"
+
+    # ── Step 2: generate zones (send boundary back) ───────────────────────
+    r = client.post('/api/zones/generate',
+                    json={'boundary_geojson': boundary, 'num_classes': 10})
+    assert r.status_code == 200, f"generate failed: {r.data[:500]}"
+    gen = r.get_json()
+
+    # Store expects: zones, gvf, class_breaks, legend
+    assert 'zones' in gen, f"Missing 'zones' in response: {list(gen.keys())}"
+    assert 'gvf' in gen, f"Missing 'gvf' in response: {list(gen.keys())}"
+    assert 'class_breaks' in gen
+    assert 'legend' in gen
+
+    # zones must be a valid GeoJSON FeatureCollection with features
+    zones = gen['zones']
+    assert zones['type'] == 'FeatureCollection', f"zones type: {zones.get('type')}"
+    assert len(zones['features']) > 0, "zones has no features"
+
+    # Each feature should have a 'zone' property (used by style function)
+    # and a non-null geometry (otherwise OL can't render it)
+    for i, feat in enumerate(zones['features']):
+        assert 'zone' in feat.get('properties', {}), \
+            f"Feature {i} missing 'zone' property: {feat.get('properties')}"
+        assert feat.get('geometry') is not None, \
+            f"Feature {i} has null geometry (zone={feat['properties'].get('zone')})"
+
+    # GVF should be list of [num_classes, gvf_value] pairs
+    assert isinstance(gen['gvf'], list)
+    assert len(gen['gvf']) > 0
+    for pair in gen['gvf']:
+        assert isinstance(pair, list) and len(pair) == 2, \
+            f"GVF entry should be [n, val], got {pair}"
+        assert isinstance(pair[0], int), f"GVF class count should be int, got {type(pair[0])}"
+        assert isinstance(pair[1], float), f"GVF value should be float, got {type(pair[1])}"
+
+    # class_breaks: list of pre-formatted strings like "7.2 - 7.9"
+    assert isinstance(gen['class_breaks'], list)
+    for cb in gen['class_breaks']:
+        assert isinstance(cb, str), f"class_break should be str, got {type(cb)}: {cb}"
+
+    # legend: list of [color_hex, label] pairs
+    assert isinstance(gen['legend'], list)
+    for item in gen['legend']:
+        assert isinstance(item, list) and len(item) == 2, \
+            f"Legend item should be [color, label], got {item}"
+        assert item[0].startswith('#'), f"Legend color should be hex, got {item[0]}"
+        assert isinstance(item[1], str), f"Legend label should be str, got {item[1]}"
+
+    # ── Step 3: finalize zones ────────────────────────────────────────────
+    r = client.post('/api/zones/finalize', json={'num_classes': 3})
+    assert r.status_code == 200, f"finalize failed: {r.data[:500]}"
+    fin = r.get_json()
+
+    # Store expects: zones, class_breaks, legend
+    assert 'zones' in fin
+    assert fin['zones']['type'] == 'FeatureCollection'
+    assert len(fin['zones']['features']) > 0
+    assert 'class_breaks' in fin
+    assert 'legend' in fin
+
+    # ── Step 4: export GeoJSON ────────────────────────────────────────────
+    r = client.post('/api/export', json={'format': 'geojson'})
+    assert r.status_code == 200, f"export failed: {r.data[:500]}"
+    exported = json.loads(r.data)
+    assert exported['type'] == 'FeatureCollection'
