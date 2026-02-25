@@ -3,30 +3,18 @@
     <header class="app-header">
       <div class="container flex items-center justify-between">
         <div class="logo">
-          <img src="/frontend/static/img/logonew.png" alt="EZZone" />
+          <img src="/img/ezzone_logo_large.png" alt="EZZone" />
           <span class="logo-text">EZZone</span>
         </div>
-        <nav class="nav">
-          <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">
-            Home
-          </router-link>
-          <router-link to="/draw-boundary" class="nav-link" :class="{ active: $route.path === '/draw-boundary' }">
-            Draw Boundary
-          </router-link>
-          <router-link to="/zones" class="nav-link" :class="{ active: $route.path === '/zones' }">
-            Zones
-          </router-link>
-          <router-link to="/finalize" class="nav-link" :class="{ active: $route.path === '/finalize' }">
-            Finalize
-          </router-link>
-        </nav>
       </div>
     </header>
     
     <main class="app-main">
       <div class="container">
-        <ProgressStepper :current-step="routeStep" />
-        <router-view />
+        <HomeView v-if="store.step === 1" />
+        <DrawBoundaryView v-else-if="store.step === 2" />
+        <ZonesView v-else-if="store.step === 3" />
+        <FinalizeView v-else-if="store.step === 4" />
       </div>
     </main>
     
@@ -54,18 +42,13 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
 import { useZoneStore } from './stores/zoneStore'
-import ProgressStepper from './components/ProgressStepper.vue'
+import HomeView from './views/HomeView.vue'
+import DrawBoundaryView from './views/DrawBoundaryView.vue'
+import ZonesView from './views/ZonesView.vue'
+import FinalizeView from './views/FinalizeView.vue'
 
 const store = useZoneStore()
-const route = useRoute()
-
-const routeStep = computed(() => {
-  const map = { '/': 1, '/draw-boundary': 2, '/zones': 3, '/finalize': 4 }
-  return map[route.path] || 1
-})
 </script>
 
 <style scoped>
@@ -101,31 +84,6 @@ const routeStep = computed(() => {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-}
-
-.nav {
-  display: flex;
-  gap: var(--space-xs);
-}
-
-.nav-link {
-  padding: var(--space-sm) var(--space-md);
-  color: var(--text-secondary);
-  text-decoration: none;
-  border-radius: var(--radius-sm);
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition: all var(--transition-fast);
-}
-
-.nav-link:hover {
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-}
-
-.nav-link.active {
-  color: var(--accent-primary);
-  background: rgba(29, 155, 240, 0.1);
 }
 
 .app-main {

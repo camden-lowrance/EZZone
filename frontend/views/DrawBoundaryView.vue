@@ -54,12 +54,12 @@
       <div class="info-panel mt-md">
         <div class="grid grid-3">
           <div class="info-item">
-            <span class="info-label">Field Type</span>
-            <span class="info-value">{{ fieldTypeLabel }}</span>
+            <span class="info-label">Detected CRS</span>
+            <span class="info-value">{{ store.results.detectedCrs || 'Auto' }}</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Points</span>
-            <span class="info-value">{{ pointCount }}</span>
+            <span class="info-label">Value Column</span>
+            <span class="info-value">{{ store.results.detectedZ || 'Z' }}</span>
           </div>
           <div class="info-item">
             <span class="info-label">Area</span>
@@ -83,7 +83,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useZoneStore } from '../stores/zoneStore'
 import Map from 'ol/Map'
 import View from 'ol/View'
@@ -95,7 +94,6 @@ import { Circle, Fill, Stroke, Style } from 'ol/style'
 import TileLayer from 'ol/layer/Tile'
 import XYZ from 'ol/source/XYZ'
 
-const router = useRouter()
 const store = useZoneStore()
 
 const mapContainer = ref(null)
@@ -105,19 +103,6 @@ let currentInteraction = null
 let snapInteraction = null
 let boundaryLayer = null
 let boundarySource = null
-
-const fieldTypeLabel = computed(() => {
-  const types = { 1: 'Rectangular', 2: 'Center Pivot VRI', 3: 'Irregular' }
-  return types[store.fieldType] || 'Unknown'
-})
-
-const pointCount = computed(() => {
-  if (!boundarySource) return 0
-  const features = boundarySource.getFeatures()
-  if (!features.length) return 0
-  const geom = features[0].getGeometry()
-  return geom.getCoordinates()[0]?.length || 0
-})
 
 const area = computed(() => {
   if (!boundarySource) return '0 m²'
@@ -185,8 +170,8 @@ function initMap() {
     })
   })
 
-  if (store.boundary) {
-    loadBoundary(store.boundary)
+  if (store.results.boundary) {
+    loadBoundary(store.results.boundary)
   }
 
   updateInteractions()
@@ -207,7 +192,7 @@ function removeInteractions() {
 function syncBoundary() {
   const features = boundarySource.getFeatures()
   if (features.length) {
-    store.setBoundary(geojsonFormat.writeFeatureObject(features[0]))
+    store.results.boundary = geojsonFormat.writeFeatureObject(features[0])
   }
 }
 
@@ -263,28 +248,28 @@ function loadBoundary(geojson) {
 
 function clearDrawing() {
   boundarySource.clear()
-  store.setBoundary(null)
+  store.results.boundary = null
 }
 
 function useDefaultBoundary() {
-  if (store.boundary) {
-    loadBoundary(store.boundary)
+  if (store.results.boundary) {
+    loadBoundary(store.results.boundary)
   }
 }
 
 function goBack() {
-  router.push('/')
+  store.step = 1
 }
 
 async function continueToZones() {
-  if (!store.boundary) {
+  if (!store.results.boundary) {
     store.error = 'Please draw a boundary first'
     return
   }
   
   try {
-    await store.generateZones(10)
-    router.push('/zones')
+    await store.generateZones()
+    store.step = 3
   } catch (e) {
     // Error handled in store
   }

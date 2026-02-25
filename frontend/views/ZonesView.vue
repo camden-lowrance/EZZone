@@ -14,10 +14,10 @@
         <!-- Class Selection -->
         <div class="form-group">
           <label class="form-label">
-            Number of Classes: {{ numClasses }}
+            Number of Classes: {{ store.config.numClasses }}
           </label>
           <input 
-            v-model.number="numClasses"
+            v-model.number="store.config.numClasses"
             type="range"
             class="slider"
             min="2"
@@ -31,11 +31,11 @@
         </div>
         
         <!-- Legend -->
-        <div v-if="store.legend" class="legend">
+        <div v-if="store.results.legend" class="legend">
           <h4 class="mb-sm">Legend</h4>
           <div class="legend-items">
             <div 
-              v-for="(item, i) in store.legend" 
+              v-for="(item, i) in store.results.legend" 
               :key="i"
               class="legend-item"
             >
@@ -99,7 +99,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRef } from 'vue'
-import { useRouter } from 'vue-router'
 import { useZoneStore } from '../stores/zoneStore'
 import { Line } from 'vue-chartjs'
 import {
@@ -131,20 +130,18 @@ ChartJS.register(
   Legend
 )
 
-const router = useRouter()
 const store = useZoneStore()
 
 const mapContainer = ref(null)
-const numClasses = ref(10)
 let map = null
 let zonesLayer = null
 let zonesSource = null
 
 const chartData = computed(() => ({
-  labels: store.gvf.map((_, i) => i + 2),
+  labels: store.results.gvf.map((_, i) => i + 2),
   datasets: [{
     label: 'GVF',
-    data: store.gvf.map(g => g[1]),
+    data: store.results.gvf.map(g => g[1]),
     borderColor: '#1d9bf0',
     backgroundColor: 'rgba(29, 155, 240, 0.1)',
     fill: true,
@@ -191,8 +188,8 @@ const chartOptions = {
 }
 
 const classBreakTable = computed(() => {
-  if (!store.classBreaks.length) return []
-  return store.classBreaks
+  if (!store.results.classBreaks.length) return []
+  return store.results.classBreaks
 })
 
 onMounted(() => {
@@ -206,24 +203,20 @@ onUnmounted(() => {
 })
 
 // Reload zones whenever store data changes (e.g. after async fetch completes)
-watch(toRef(store, 'zones'), () => {
+watch(toRef(store.results, 'zones'), () => {
   if (map) loadZones()
 })
 
 function initMap() {
   zonesSource = new VectorSource()
   
-  const zoneColors = [
-    '#00ba7c', '#1d9bf0', '#f4212e', '#ff7a00', '#ffd400',
-    '#9b5de5', '#00f5d4', '#fee440', '#f15bb5', '#00bbf9',
-    '#9b5de5', '#f15bb5', '#00f5d4', '#fee440'
-  ]
-
   zonesLayer = new VectorLayer({
     source: zonesSource,
     style: (feature) => {
       const classNum = feature.get('zone')
-      const color = zoneColors[classNum - 1] || zoneColors[0]
+      const color = (store.results.legend && store.results.legend[classNum - 1]) 
+        ? store.results.legend[classNum - 1][0] 
+        : '#1d9bf0'
       return new Style({
         fill: new Fill({ color: color + '80' }),
         stroke: new Stroke({ color, width: 1 })
@@ -252,10 +245,10 @@ function initMap() {
 }
 
 function loadZones() {
-  if (!store.zones || !zonesSource) return
+  if (!store.results.zones || !zonesSource) return
 
   zonesSource.clear()
-  const geojson = store.zones
+  const geojson = store.results.zones
   const features = new GeoJSON().readFeatures(geojson, {
     dataProjection: 'EPSG:4326',
     featureProjection: 'EPSG:3857'
@@ -269,7 +262,7 @@ function loadZones() {
 
 async function regenerateZones() {
   try {
-    await store.generateZones(numClasses.value)
+    await store.generateZones()
     loadZones()
   } catch (e) {
     // Error handled in store
@@ -277,13 +270,12 @@ async function regenerateZones() {
 }
 
 function goBack() {
-  router.push('/draw-boundary')
+  store.step = 2
 }
 
 async function continueToFinalize() {
   try {
-    await store.finalizeZones(numClasses.value)
-    router.push('/finalize')
+    await store.finalizeZones()
   } catch (e) {
     // Error handled in store
   }

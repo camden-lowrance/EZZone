@@ -1,0 +1,149 @@
+"""
+Simplified Zone generation service for agricultural management.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import io
+import zipfile
+import tempfile
+from typing import Any
+
+import numpy as np
+import geopandas as gpd
+import geojson
+from shapely.geometry import shape
+
+from .geo import (
+    bound_json,
+    reproject_poly,
+    utmzone,
+    interpolate_raster,
+    classify_raster,
+    polygonize_classes_fast,
+    gvf_array,
+    gvf_json,
+    json_color_codes,
+    json_legend,
+    zones_to_geojson_fc_gdf,
+)
+
+
+def _extract_geometry(boundary: dict) -> dict:
+    """Extract a raw geometry dict from various GeoJSON structures."""
+    if boundary.get('type') == 'FeatureCollection':
+        return boundary['features'][0]['geometry']
+    if boundary.get('type') == 'Feature':
+        return boundary['geometry']
+    if 'geometry' in boundary and isinstance(boundary['geometry'], dict):
+        return boundary['geometry']
+    return boundary  # raw geometry (Polygon, etc.)
+
+
+def generate_zones(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    in_projection: str = 'epsg:4326',
+    boundary_geojson: str | dict | None = None,
+    num_classes: int = 3
+) -> dict[str, Any]:
+    """
+    Generate agricultural management zones from point data.
+
+    Algorithm:
+    1. Interpolate scattered points to raster
+    2. Classify pixels directly with Jenks breaks
+    3. Polygonize classified raster
+    4. Clip to boundary, reproject to WGS84, export GeoJSON
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+    
+    # Create or use boundary (always irregular/convex hull now)
+    if boundary_geojson is None:
+        boundary = bound_json(x, y, geometry_type=3, in_projection=in_projection, out_projection=in_projection)
+    else:
+        boundary = json.loads(boundary_geojson) if isinstance(boundary_geojson, str) else boundary_geojson
+    
+    boundary_geom = _extract_geometry(boundary)
+
+    # Reproject boundary to WGS84 and determine UTM zone
+    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection='epsg:4326')
+    utm_crs = utmzone(boundary_wgs84)
+    boundary_utm = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection=utm_crs)
+    
+    # Interpolate point data to raster
+    array, raster_bounds = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
+    
+    # Compute GVF for 2-10 classes based on pixel values
+    flat_values = array.flatten()
+    valid_values = flat_values[~np.isnan(flat_values)]
+    gvf_arr = gvf_array(valid_values, 10)
+    
+    # Classify raster pixels and polygonize
+    classified, class_breaks = classify_raster(array, num_classes)
+    gdf = polygonize_classes_fast(classified, raster_bounds, boundary_utm, utm_crs)
+    
+    # Convert to GeoJSON
+    zones_geojson = geojson.loads(gdf.to_json())
+    cmap_def, cmap_sel = json_color_codes(len(class_breaks))
+    legend = json_legend(class_breaks)
+    
+    return {
+        'zones': zones_geojson,
+        'gvf': gvf_json(gvf_arr),
+        'class_breaks': class_breaks,
+        'boundary': boundary,
+        'grid_stats': {
+            'num_polys': len(gdf),
+            'num_zones': len(class_breaks)
+        },
+        'legend': legend,
+        'cmap_def': cmap_def,
+        'cmap_sel': cmap_sel
+    }
+
+
+def compute_gvf(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    in_projection: str = 'epsg:4326'
+) -> list[float]:
+    """Compute GVF values for 2-10 classes without generating full zones."""
+    x, y, z = np.asarray(x, float), np.asarray(y, float), np.asarray(z, float)
+    
+    boundary = bound_json(x, y, geometry_type=3, in_projection=in_projection, out_projection=in_projection)
+    boundary_geom = _extract_geometry(boundary)
+
+    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection='epsg:4326')
+    utm_crs = utmzone(boundary_wgs84)
+    boundary_utm = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection=utm_crs)
+
+    array, _ = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
+    valid_values = array[~np.isnan(array)]
+    return gvf_array(valid_values, 10)
+
+
+def export_zones(
+    zones_geojson: dict,
+    format: str = 'geojson'
+) -> str | bytes:
+    """Export zones to different formats."""
+    if format == 'geojson':
+        return json.dumps(zones_geojson)
+    elif format == 'shapefile':
+        gdf = gpd.GeoDataFrame.from_features(zones_geojson['features'], crs='epsg:4326')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outpath = f"{tmpdir}/zones.shp"
+            gdf.to_file(outpath)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fname in os.listdir(tmpdir):
+                    zf.write(os.path.join(tmpdir, fname), fname)
+        return buf.getvalue()
+    raise ValueError(f"Unsupported format: {format}")

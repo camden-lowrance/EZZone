@@ -23,21 +23,24 @@ werkzeug = "3.1.6"
 flask-session = "0.8.0"
 python-dotenv = "1.2.1"
 pytest = "9.0.2"
+diskcache = ">=5.6.3,<6"
+pyogrio = ">=0.12.1,<0.13"
+openpyxl = ">=3.1.5,<4"
 
 [tasks]
 # Frontend
 install-fe = "npm install"
 build = "npm run build"
-dev-fe = { cmd = ["npm", "run", "dev"], cwd = "frontend" }
+dev-fe = { cmd = ["npm", "run", "dev"], cwd = "." }
 preview = "npm run preview"
 
 # Backend
-dev-be = { cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run", "--reload", "--debug"], cwd = "." }
-serve = { cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run", "--port", "5000"], cwd = "." }
+dev-be = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--reload", "--debug"], cwd = "backend" }
+serve = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--port", "5000"], cwd = "backend" }
 
 # Full Stack
 dev = { depends-on = ["dev-fe", "dev-be"] }
-start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "backend.src.app:create_app", "run"] }
+start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run"], cwd = "backend" }
 
 # Testing
 test = "pytest tests/"

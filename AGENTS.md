@@ -1,272 +1,102 @@
 # Agent Development Guide
 
-This document provides guidelines for AI agents working on the ezzone-pyanywhere project.
+Guidelines for AI agents working on the ezzone-pyanywhere project.
 
 ## Project Overview
 
-**ezzone-pyanywhere** is an agricultural management zone generation web application built with:
-- **Frontend:** Vue.js with Vite
+**ezzone-pyanywhere** is an agricultural management zone generation web application. Users upload point-sampled field data (soil EC, yield, NDVI, etc.), draw a field boundary, classify into management zones, and export.
+
+- **Frontend:** Vue 3 + Vite, OpenLayers (maps), Chart.js, Pinia (state)
 - **Backend:** Python Flask API
-- **Geospatial:** GDAL, rasterio, shapely, geopandas
-- **Environment:** Pixi for dependency management
+- **Geospatial:** GDAL, rasterio, shapely, geopandas, scipy
+- **Environment:** Pixi (conda-forge)
 
-## Development Environment Setup
-
-### Using Pixi (Recommended)
-
-1. **Install Pixi** (if not already installed):
-   ```bash
-   # Windows
-   winget install prefix-dev.pixi
-   
-   # Or download from https://pixi.sh/install
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pixi install
-   ```
-
-3. **Start development environment:**
-   ```bash
-   # Full stack development (frontend + backend)
-   pixi run dev
-   
-   # Backend only
-   pixi run dev-be
-   
-   # Frontend only  
-   pixi run dev-fe
-   
-   # Production server
-   pixi run start
-   ```
-
-### Alternative: Direct Python
-
-If Pixi is not available:
+## Commands
 
 ```bash
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Start Flask development server
-python -m flask --app src.app:create_app run --reload --debug
+pixi install                               # Install all dependencies
+pixi run dev                               # Frontend + backend dev servers
+pixi run dev-be                            # Backend only (Flask --reload --debug)
+pixi run dev-fe                            # Frontend only (Vite)
+pixi run start                             # Build frontend, then serve via Flask
+pixi run build                             # Build frontend only
+pixi run test                              # pytest tests/
+pixi run test-cov                          # pytest with HTML coverage
+pytest tests/test_mz_api.py                # Single test file
+pytest tests/test_mz_api.py::test_name     # Single test
+pixi add package_name                      # Add Python dependency
+npm install package-name                   # Add JS dependency
 ```
 
 ## Project Structure
 
 ```
-ezzone-pyanywhere/
-├── backend/
-│   └── src/                # Python backend code
-│       ├── app.py          # Flask application entry point
-│       ├── api.py          # API endpoints
-│       ├── geo/            # Geospatial processing core
-│       │   ├── geo_core.py # Main geospatial algorithms
-│       │   └── __init__.py
-│       ├── zones/          # Zone generation service
-│       │   ├── service.py  # Zone generation logic
-│       │   └── __init__.py
-│       └── static/         # Backend static assets
-├── frontend/               # Vue.js frontend code
-│   ├── App.vue            # Main Vue component
-│   ├── main.js            # Vue entry point
-│   ├── style.css          # Global styles
-│   ├── components/        # Vue components
-│   ├── router/            # Vue router
-│   ├── stores/            # Vue state management
-│   └── views/             # Vue views
-├── static/                # Shared web assets (OpenLayers, etc.)
-├── tests/                 # Test suite
-├── pixi.toml             # Environment configuration
-└── package.json          # Frontend dependencies
+backend/src/
+├── app.py          # Flask factory (create_app), serves Vue SPA from dist/
+├── api.py          # REST endpoints, diskcache session storage (24hr, UUID-keyed)
+├── geo.py          # Core geospatial: boundaries, reprojection, interpolation, classification, polygonization
+├── zones.py        # Zone generation orchestrator + GVF computation
+└── io_service.py   # Multi-format file loading (CSV, Excel, Shapefile, GeoJSON, KML)
+
+frontend/
+├── App.vue                    # Root component: 4-step wizard container
+├── main.js                    # Vue entry point (Pinia setup)
+├── style.css                  # Global dark theme
+├── stores/zoneStore.js        # Pinia store: UI state + API calls
+└── views/
+    ├── HomeView.vue           # Step 1: File upload + Z-column config
+    ├── DrawBoundaryView.vue   # Step 2: OpenLayers boundary editing
+    ├── ZonesView.vue          # Step 3: GVF chart + zone preview
+    └── FinalizeView.vue       # Step 4: Export (GeoJSON/Shapefile)
+
+tests/
+├── test_mz_api.py                  # Core algorithm unit tests
+├── test_integration.py             # Flask end-to-end tests
+├── test_fast_polygonization.py     # Polygonization tests
+├── test_polygonization_summary.py  # Polygonization edge cases
+└── fixtures/                       # Real-world CSV datasets
 ```
 
-## Key Technologies
+## Architecture
 
-### Backend (Python)
-- **Flask**: Web framework
-- **GDAL**: Geospatial data processing (required dependency)
-- **rasterio**: Raster data processing
-- **shapely**: Geometric operations
-- **geopandas**: GeoDataFrame operations
-- **numpy/scipy**: Scientific computing
-- **jenkspy**: Statistical classification
+### API Endpoints
 
-### Frontend (JavaScript/Vue)
-- **Vue 3**: Frontend framework
-- **Vite**: Build tool
-- **OpenLayers**: Map rendering
-- **Bootstrap**: UI components
+- `POST /api/session/init` — Upload file → load to GeoDataFrame → auto-detect CRS/Z-column → compute boundary → cache
+- `POST /api/zones/generate` — Generate zones from cached data with custom boundary + num_classes
+- `POST /api/export` — Export cached zones as GeoJSON or Shapefile (.zip)
+- `GET /api/health` — Health check
 
-## Development Guidelines
+### Processing Pipeline
 
-### Python Code Style
-- Follow PEP 8 conventions
-- Use type hints for function signatures
-- Import GDAL directly (no fallbacks)
-- Use in-memory processing where possible
-
-### Geospatial Processing
-- **GDAL is required** - no fallback mechanisms
-- Use `polygonize_classes_fast()` for raster polygonization
-- Maintain 5m fixed resolution for performance
-- Use vectorized operations with numpy
-
-### API Development
-- Use Flask blueprints for organization
-- Return GeoJSON for spatial data
-- Handle coordinate system transformations properly
-- Use consistent error handling
-
-### Frontend Development
-- Use Vue 3 Composition API
-- Follow component-based architecture
-- Handle map interactions through OpenLayers
-- Use reactive state management
-
-## Common Tasks
-
-### Adding New Dependencies
-
-**Python dependencies:**
-```bash
-# Add to pixi.toml
-pixi add package_name
-
-# Or specify version
-pixi add package_name=1.2.3
+```
+Upload → load_to_gdf (auto-detect CRS/columns)
+  → convex hull boundary → user edits boundary
+  → reproject to UTM → interpolate to 5m raster (scipy)
+  → classify (Natural Breaks / jenkspy) → polygonize (GDAL)
+  → reproject to EPSG:4326 → serve as GeoJSON FeatureCollection
 ```
 
-**JavaScript dependencies:**
-```bash
-npm install package-name
-```
+### Frontend
 
-### Running Tests
-```bash
-# Python tests
-pixi run test
+4-step wizard SPA. No Vue Router — step state managed in Pinia store (`zoneStore.js`). Vite proxies `/api` to `localhost:5000` in dev.
 
-# Python tests with coverage
-pixi run test-cov
+### State Management
 
-# Frontend tests (if configured)
-npm test
-```
+- **Frontend:** Pinia store holds step, loading, error, dataId, config, results
+- **Backend:** Stateless endpoints; diskcache stores session data keyed by UUID (24hr expiry)
 
-### Building for Production
-```bash
-# Build frontend
-pixi run build
+## Key Constraints
 
-# Start production server
-pixi run start
-```
+- **GDAL is required** — no fallbacks. Pinned to 3.12.2 in pixi.toml.
+- Fixed **5m raster resolution** for performance (target <1s polygonization).
+- All spatial output is **EPSG:4326 GeoJSON**; internal processing uses UTM.
+- Use `polygonize_classes_fast()` — not GDAL's built-in polygonize.
+- Frontend uses **Vue 3 Composition API** and dark theme CSS variables.
+- `conftest.py` adds `backend/` to `sys.path` so tests can `import src`.
 
-### Development Workflow
-```bash
-# 1. Install dependencies
-pixi install
+## Code Style
 
-# 2. Start development servers
-pixi run dev
-
-# 3. Make changes to code
-
-# 4. Run tests
-pixi run test
-
-# 5. Build for production
-pixi run build
-```
-
-## Important Notes
-
-### GDAL Dependency
-- GDAL version 3.12.2 is pinned in `pixi.toml`
-- **No fallback mechanisms** - GDAL is required
-- Fast polygonization uses `polygonize_classes_fast()` exclusively
-- Ensure GDAL is properly installed in all environments
-
-### Performance Considerations
-- Target: <1 second polygonization for typical datasets
-- Use fixed 5m resolution for consistent performance
+- Python: PEP 8, type hints on function signatures, GDAL imported directly
+- JavaScript: Vue 3 Composition API, component-based architecture
 - Prefer in-memory processing over file I/O
-- Use vectorized numpy operations
-
-### Coordinate Systems
-- Input coordinates typically in EPSG:4326 (WGS84)
-- Processing done in UTM zones for accuracy
-- Output GeoJSON in EPSG:4326
-- Use `pyproj` for transformations
-
-### Error Handling
-- Handle GDAL import errors gracefully
-- Validate input data before processing
-- Return meaningful error messages in API responses
-- Log errors appropriately
-
-## Troubleshooting
-
-### Common Issues
-
-**GDAL Import Errors:**
-```bash
-# Reinstall GDAL
-pixi remove gdal
-pixi add gdal=3.12.2
-```
-
-**Python Path Issues:**
-```bash
-# Ensure pixi environment is activated
-pixi shell
-python -c "import gdal; print(gdal.__version__)"
-```
-
-**Frontend Build Issues:**
-```bash
-# Clean and rebuild
-rm -rf node_modules dist
-npm install
-pixi run build
-```
-
-### Debug Commands
-```bash
-# Check installed versions
-pixi list
-
-# Check Python environment
-python --version
-python -c "import sys; print(sys.path)"
-
-# Test GDAL functionality
-python -c "from osgeo import gdal; print('GDAL OK')"
-```
-
-## Contributing
-
-1. **Fork the repository**
-2. **Create a feature branch**
-3. **Make changes following guidelines**
-4. **Run tests and build**
-5. **Submit pull request**
-
-### Code Review Checklist
-- [ ] Follows Python/JavaScript style guides
-- [ ] Includes appropriate type hints
-- [ ] Handles GDAL dependencies correctly
-- [ ] Maintains performance standards
-- [ ] Includes tests for new functionality
-- [ ] Updates documentation if needed
-
-## Resources
-
-- [Flask Documentation](https://flask.palletsprojects.com/)
-- [GDAL Python API](https://gdal.org/python/)
-- [Vue 3 Guide](https://vuejs.org/guide/introduction.html)
-- [Pixi Documentation](https://pixi.sh/)
-- [OpenLayers Documentation](https://openlayers.org/)
+- Use vectorized numpy operations for performance

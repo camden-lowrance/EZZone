@@ -1,248 +1,103 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 
 export const useZoneStore = defineStore('zones', () => {
-  // State
-  const sessionId = ref(null)
-  const dataPoints = ref({ x: [], y: [], z: [] })
-  const boundary = ref(null)
-  const fieldType = ref(1) // 1=rect, 2=VRI, 3=irreg
-  const epsg = ref('4326')
-  const units = ref('m')
-  const rowSpacing = ref(100)
-  const pivotSpacing = ref(50)
-  const pivotLength = ref(500)
-  
-  // Zone generation results
-  const zones = ref(null)
-  const gvf = ref([])
-  const classBreaks = ref([])
-  const legend = ref(null)
-  const gridStats = ref(null)
-  
-  // UI state
+  const step = ref(1)
   const loading = ref(false)
   const error = ref(null)
-  const step = ref(1) // 1=data, 2=boundary, 3=zones, 4=finalize
+  const dataId = ref(null)
   
-  // Computed
-  const hasData = computed(() => dataPoints.value.x.length > 0)
-  const hasBoundary = computed(() => boundary.value !== null)
-  const hasZones = computed(() => zones.value !== null)
+  const config = ref({
+    numClasses: 3,
+    zColumn: '' // User can specify which column has the values
+  })
   
-  // Actions
-  async function initSession(file, columns) {
-    loading.value = true
-    error.value = null
-    
+  const results = ref({
+    detectedCrs: null,
+    detectedZ: null,
+    boundary: null,
+    zones: null,
+    gvf: [],
+    classBreaks: [],
+    legend: null,
+    gridStats: null
+  })
+
+  async function initSession(file, zColumn = '') {
+    loading.value = true; error.value = null
     try {
       const formData = new FormData()
-      if (file) {
-        formData.append('file', file)
-      }
-      formData.append('columns', JSON.stringify(columns))
-      formData.append('epsg', epsg.value)
-      formData.append('field_type', fieldType.value)
-      formData.append('units', units.value)
-      formData.append('row_spacing', rowSpacing.value)
-      formData.append('pivot_spacing', pivotSpacing.value)
-      formData.append('pivot_length', pivotLength.value)
+      if (file) formData.append('file', file)
+      if (zColumn) formData.append('z_column', zColumn)
       
-      const response = await fetch('/api/session/init', {
-        method: 'POST',
-        body: formData
-      })
+      const res = await fetch('/api/session/init', { method: 'POST', body: formData })
+      if (!res.ok) throw new Error((await res.json()).error)
       
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to initialize session')
-      }
-      
-      const data = await response.json()
-      sessionId.value = data.session_id
-      boundary.value = data.boundary
-      gridStats.value = data.grid_stats
-      
+      const data = await res.json()
+      dataId.value = data.data_id
+      results.value.boundary = data.boundary
+      results.value.gridStats = data.grid_stats
+      results.value.detectedCrs = data.detected_crs
+      results.value.detectedZ = data.detected_z
       step.value = 2
-      return data
-    } catch (e) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
+    } catch (e) { error.value = e.message } finally { loading.value = false }
   }
   
-  async function generateZones(numClasses = 10) {
-    loading.value = true
-    error.value = null
-    
+  async function generateZones() {
+    loading.value = true; error.value = null
     try {
-      const response = await fetch('/api/zones/generate', {
+      const res = await fetch('/api/zones/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          boundary_geojson: boundary.value,
-          num_classes: numClasses
+          data_id: dataId.value,
+          boundary_geojson: results.value.boundary,
+          num_classes: config.value.numClasses
         })
       })
+      if (!res.ok) throw new Error((await res.json()).error)
       
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to generate zones')
-      }
-      
-      const data = await response.json()
-      zones.value = data.zones
-      gvf.value = data.gvf
-      classBreaks.value = data.class_breaks
-      legend.value = data.legend
-
+      const data = await res.json()
+      results.value.zones = data.zones
+      results.value.gvf = data.gvf
+      results.value.classBreaks = data.class_breaks
+      results.value.legend = data.legend
       step.value = 3
-      return data
-    } catch (e) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
+    } catch (e) { error.value = e.message } finally { loading.value = false }
   }
   
-  async function finalizeZones(numClasses) {
-    loading.value = true
-    error.value = null
-    
-    try {
-      const response = await fetch('/api/zones/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ num_classes: numClasses })
-      })
-      
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to finalize zones')
-      }
-      
-      const data = await response.json()
-      zones.value = data.zones
-      classBreaks.value = data.class_breaks
-      legend.value = data.legend
-      
-      step.value = 4
-      return data
-    } catch (e) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
-  }
-  
-  async function simplifyZones(smooth) {
-    loading.value = true
-    error.value = null
-    
-    try {
-      const response = await fetch('/api/zones/simplify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ smooth })
-      })
-      
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to simplify zones')
-      }
-      
-      const data = await response.json()
-      zones.value = data.zones
-      return data
-    } catch (e) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
+  async function finalizeZones() {
+    await generateZones()
+    step.value = 4
   }
   
   async function exportZones(format) {
     try {
-      const response = await fetch('/api/export', {
+      const res = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format })
+        body: JSON.stringify({ data_id: dataId.value, format })
       })
+      if (!res.ok) throw new Error('Export failed')
       
-      if (!response.ok) {
-        throw new Error('Failed to export zones')
-      }
-      
-      const blob = await response.blob()
+      const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = format === 'geojson' ? 'zones.geojson' : 'zones.zip'
-      document.body.appendChild(a)
+      a.download = `zones.${format === 'geojson' ? 'geojson' : 'zip'}`
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      error.value = e.message
-      throw e
-    }
-  }
-  
-  function setBoundary(geojson) {
-    boundary.value = geojson
+    } catch (e) { error.value = e.message }
   }
   
   function reset() {
-    sessionId.value = null
-    dataPoints.value = { x: [], y: [], z: [] }
-    boundary.value = null
-    zones.value = null
-    gvf.value = []
-    classBreaks.value = []
-    legend.value = null
-    gridStats.value = null
-    loading.value = false
-    error.value = null
+    dataId.value = null
+    results.value = { detectedCrs: null, detectedZ: null, boundary: null, zones: null, gvf: [], classBreaks: [], legend: null, gridStats: null }
     step.value = 1
+    error.value = null
   }
   
   return {
-    // State
-    sessionId,
-    dataPoints,
-    boundary,
-    fieldType,
-    epsg,
-    units,
-    rowSpacing,
-    pivotSpacing,
-    pivotLength,
-    zones,
-    gvf,
-    classBreaks,
-    legend,
-    gridStats,
-    loading,
-    error,
-    step,
-    
-    // Computed
-    hasData,
-    hasBoundary,
-    hasZones,
-    
-    // Actions
-    initSession,
-    generateZones,
-    finalizeZones,
-    simplifyZones,
-    exportZones,
-    setBoundary,
-    reset
+    step, loading, error, config, results,
+    initSession, generateZones, finalizeZones, exportZones, reset
   }
 })

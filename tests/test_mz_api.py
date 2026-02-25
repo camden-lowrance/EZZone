@@ -8,7 +8,7 @@ import os
 import numpy as np
 import pytest
 
-from src.zones import generate_zones, simplify_zones, compute_gvf, export_zones
+from src.zones import generate_zones, compute_gvf, export_zones
 
 
 # ── Test data ──────────────────────────────────────────────────────────────────
@@ -94,30 +94,6 @@ def test_compute_gvf():
     assert len(gvf) > 0
     assert all(isinstance(v, float) for v in gvf)
     assert all(0 <= v <= 1 for v in gvf)
-
-
-def test_simplify_zones():
-    """Test zone simplification."""
-    # First generate zones
-    result = generate_zones(
-        x=FIXTURE_X,
-        y=FIXTURE_Y,
-        z=FIXTURE_Z,
-        field_type=1,
-        in_projection='epsg:4326',
-        row_spacing=100,
-        num_classes=3
-    )
-    
-    # Then simplify
-    simplified = simplify_zones(
-        result['zones'],
-        row_spacing=100,
-        smooth=2
-    )
-    
-    assert simplified['type'] == 'FeatureCollection'
-    assert len(simplified['features']) > 0
 
 
 def test_export_geojson():

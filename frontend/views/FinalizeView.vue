@@ -5,30 +5,11 @@
       <div class="card">
         <h2>Final Zones</h2>
         <p class="text-muted mb-md">
-          Your zones are ready. You can simplify them further or export them 
-          for use in your precision agriculture systems.
+          Your zones are ready. Export them for use in your precision 
+          agriculture systems.
         </p>
         
         <div ref="mapContainer" class="map-container mb-md"></div>
-        
-        <!-- Simplification -->
-        <div class="form-group">
-          <label class="form-label">
-            Simplification Level: {{ simplification }}
-          </label>
-          <input 
-            v-model.number="simplification"
-            type="range"
-            class="slider"
-            min="1"
-            max="10"
-            @change="applySimplification"
-          />
-          <div class="range-labels">
-            <span>Minimal</span>
-            <span>Maximum</span>
-          </div>
-        </div>
         
         <!-- Export Options -->
         <div class="export-section mt-lg">
@@ -65,16 +46,16 @@
         
         <div class="summary-stats">
           <div class="stat-item">
-            <span class="stat-label">Total Zones</span>
-            <span class="stat-value">{{ zoneCount }}</span>
+            <span class="stat-label">Source CRS</span>
+            <span class="stat-value" style="font-size: 1rem">{{ store.results.detectedCrs }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Number of Classes</span>
+            <span class="stat-label">Source Column</span>
+            <span class="stat-value">{{ store.results.detectedZ }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Classes</span>
             <span class="stat-value">{{ numClasses }}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">Field Type</span>
-            <span class="stat-value">{{ fieldTypeLabel }}</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">GVF Score</span>
@@ -95,7 +76,7 @@
                 class="bar-fill"
                 :style="{ 
                   height: `${(count / maxClassCount) * 100}%`,
-                  background: barColors[i]
+                  background: (store.results.legend && store.results.legend[i]) ? store.results.legend[i][0] : '#1d9bf0'
                 }"
               ></div>
               <span class="bar-label">{{ i + 1 }}</span>
@@ -105,19 +86,19 @@
         </div>
         
         <!-- Legend -->
-        <div v-if="store.legend" class="mt-lg">
+        <div v-if="store.results.legend" class="mt-lg">
           <h4>Legend</h4>
           <div class="legend-items">
             <div 
-              v-for="(item, i) in store.legend" 
+              v-for="(item, i) in store.results.legend" 
               :key="i"
               class="legend-item"
             >
               <span 
                 class="legend-color" 
-                :style="{ background: item.color }"
+                :style="{ background: item[0] }"
               ></span>
-              <span class="legend-label">{{ item.label }}</span>
+              <span class="legend-label">{{ item[1] }}</span>
             </div>
           </div>
         </div>
@@ -133,7 +114,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRef } from 'vue'
-import { useRouter } from 'vue-router'
 import { useZoneStore } from '../stores/zoneStore'
 import Map from 'ol/Map'
 import View from 'ol/View'
@@ -144,45 +124,28 @@ import { Fill, Stroke, Style } from 'ol/style'
 import TileLayer from 'ol/layer/Tile'
 import XYZ from 'ol/source/XYZ'
 
-const router = useRouter()
 const store = useZoneStore()
 
 const mapContainer = ref(null)
-const simplification = ref(1)
 let map = null
 let zonesLayer = null
 let zonesSource = null
 
-const barColors = [
-  '#00ba7c', '#1d9bf0', '#f4212e', '#ff7a00', '#ffd400',
-  '#9b5de5', '#00f5d4', '#fee440', '#f15bb5', '#00bbf9'
-]
-
-const fieldTypeLabel = computed(() => {
-  const types = { 1: 'Rectangular', 2: 'Center Pivot VRI', 3: 'Irregular' }
-  return types[store.fieldType] || 'Unknown'
-})
-
-const zoneCount = computed(() => {
-  if (!store.zones?.features) return 0
-  return store.zones.features.length
-})
-
 const numClasses = computed(() => {
-  return store.legend?.length || 0
+  return store.results.legend?.length || 0
 })
 
 const gvfScore = computed(() => {
-  if (!store.gvf?.length) return 'N/A'
-  const lastGvf = store.gvf[store.gvf.length - 1]
+  if (!store.results.gvf?.length) return 'N/A'
+  const lastGvf = store.results.gvf[store.results.gvf.length - 1]
   return lastGvf ? lastGvf[1].toFixed(3) : 'N/A'
 })
 
 const classDistribution = computed(() => {
-  if (!store.zones?.features) return []
+  if (!store.results.zones?.features) return []
   
   const counts = {}
-  store.zones.features.forEach(f => {
+  store.results.zones.features.forEach(f => {
     const cls = f.properties?.zone || 1
     counts[cls] = (counts[cls] || 0) + 1
   })
@@ -209,7 +172,7 @@ onUnmounted(() => {
   }
 })
 
-watch(toRef(store, 'zones'), () => {
+watch(toRef(store.results, 'zones'), () => {
   if (map) loadZones()
 })
 
@@ -220,7 +183,9 @@ function initMap() {
     source: zonesSource,
     style: (feature) => {
       const classNum = feature.get('zone')
-      const color = barColors[classNum - 1] || barColors[0]
+      const color = (store.results.legend && store.results.legend[classNum - 1]) 
+        ? store.results.legend[classNum - 1][0] 
+        : '#1d9bf0'
       return new Style({
         fill: new Fill({ color: color + '80' }),
         stroke: new Stroke({ color, width: 1 })
@@ -249,10 +214,10 @@ function initMap() {
 }
 
 function loadZones() {
-  if (!store.zones || !zonesSource) return
+  if (!store.results.zones || !zonesSource) return
   
   zonesSource.clear()
-  const features = new GeoJSON().readFeatures(store.zones, {
+  const features = new GeoJSON().readFeatures(store.results.zones, {
     dataProjection: 'EPSG:4326',
     featureProjection: 'EPSG:3857'
   })
@@ -260,15 +225,6 @@ function loadZones() {
   
   const extent = zonesSource.getExtent()
   map.getView().fit(extent, { padding: [50, 50, 50, 50] })
-}
-
-async function applySimplification() {
-  try {
-    await store.simplifyZones(simplification.value)
-    loadZones()
-  } catch (e) {
-    // Error handled in store
-  }
 }
 
 async function exportGeoJSON() {
@@ -280,12 +236,12 @@ async function exportShapefile() {
 }
 
 function goBack() {
-  router.push('/zones')
+  store.step = 3
 }
 
 function startOver() {
   store.reset()
-  router.push('/')
+  store.step = 1
 }
 </script>
 
