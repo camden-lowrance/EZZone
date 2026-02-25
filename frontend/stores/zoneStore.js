@@ -15,6 +15,9 @@ export const useZoneStore = defineStore('zones', () => {
   const results = ref({
     detectedCrs: null,
     detectedZ: null,
+    allColumns: [],
+    numericColumns: [],
+    previewData: [],
     boundary: null,
     zones: null,
     gvf: [],
@@ -23,12 +26,13 @@ export const useZoneStore = defineStore('zones', () => {
     gridStats: null
   })
 
-  async function initSession(file, zColumn = '') {
+  async function initSession(file, zColumn = '', crs = '') {
     loading.value = true; error.value = null
     try {
       const formData = new FormData()
       if (file) formData.append('file', file)
       if (zColumn) formData.append('z_column', zColumn)
+      if (crs) formData.append('crs', crs)
       
       const res = await fetch('/api/session/init', { method: 'POST', body: formData })
       if (!res.ok) throw new Error((await res.json()).error)
@@ -39,7 +43,9 @@ export const useZoneStore = defineStore('zones', () => {
       results.value.gridStats = data.grid_stats
       results.value.detectedCrs = data.detected_crs
       results.value.detectedZ = data.detected_z
-      step.value = 2
+      results.value.allColumns = data.all_columns || []
+      results.value.numericColumns = data.numeric_columns || []
+      results.value.previewData = data.preview_data || []
     } catch (e) { error.value = e.message } finally { loading.value = false }
   }
   
@@ -91,7 +97,19 @@ export const useZoneStore = defineStore('zones', () => {
   
   function reset() {
     dataId.value = null
-    results.value = { detectedCrs: null, detectedZ: null, boundary: null, zones: null, gvf: [], classBreaks: [], legend: null, gridStats: null }
+    results.value = {
+      detectedCrs: null,
+      detectedZ: null,
+      allColumns: [],
+      numericColumns: [],
+      previewData: [],
+      boundary: null,
+      zones: null,
+      gvf: [],
+      classBreaks: [],
+      legend: null,
+      gridStats: null
+    }
     step.value = 1
     error.value = null
   }

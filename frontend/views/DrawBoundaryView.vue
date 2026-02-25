@@ -52,14 +52,10 @@
       
       <!-- Info Panel -->
       <div class="info-panel mt-md">
-        <div class="grid grid-3">
+        <div class="grid grid-2">
           <div class="info-item">
             <span class="info-label">Detected CRS</span>
             <span class="info-value">{{ store.results.detectedCrs || 'Auto' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Value Column</span>
-            <span class="info-value">{{ store.results.detectedZ || 'Z' }}</span>
           </div>
           <div class="info-item">
             <span class="info-label">Area</span>

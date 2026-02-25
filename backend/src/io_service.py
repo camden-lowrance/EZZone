@@ -27,7 +27,7 @@ def _detect_z_col(df: pd.DataFrame, exclude: list[str]) -> str | None:
     candidates = [c for c in numeric_cols if c.lower() not in exclude_lower]
     return candidates[0] if candidates else (numeric_cols[0] if numeric_cols else None)
 
-def load_to_gdf(filepath: str, z_col_req: str | None = None) -> tuple[gpd.GeoDataFrame, str]:
+def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str | None = None) -> tuple[gpd.GeoDataFrame, str]:
     """
     Universally load a file (Vector, CSV, Excel) and return a GeoDataFrame 
     and the name of the selected Z column.
@@ -55,7 +55,11 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None) -> tuple[gpd.GeoDat
         
         df = df.dropna(subset=list(coords))
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[coords[0]], df[coords[1]]))
-        gdf.set_crs('epsg:4326', inplace=True) # Default assumption for flat files
+        gdf.set_crs(crs_override or 'epsg:4326', inplace=True)
+        # Store coordinate column names to exclude them from Z detection later
+        gdf._coord_cols = list(coords)
+    else:
+        gdf._coord_cols = []
 
     # Ensure point geometries
     if not all(gdf.geometry.type == 'Point'):
@@ -65,8 +69,15 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None) -> tuple[gpd.GeoDat
         gdf.set_crs('epsg:4326', inplace=True)
     
     # Identify Z column
-    z_col = z_col_req if z_col_req in gdf.columns else _detect_z_col(gdf, exclude=[gdf.geometry.name])
-    if not z_col:
-        raise ValueError('No numeric data column found.')
+    if z_col_req in gdf.columns:
+        z_col = z_col_req
+        if not pd.api.types.is_numeric_dtype(gdf[z_col]):
+            gdf[z_col] = pd.to_numeric(gdf[z_col].astype(str).str.replace(',', '.'), errors='coerce')
+    else:
+        exclude_cols = [gdf.geometry.name] + getattr(gdf, '_coord_cols', [])
+        z_col = _detect_z_col(gdf, exclude=exclude_cols)
+    
+    if not z_col or gdf[z_col].isna().all():
+        raise ValueError(f'No valid numeric data found in column "{z_col_req or z_col}"')
 
     return gdf, str(z_col)

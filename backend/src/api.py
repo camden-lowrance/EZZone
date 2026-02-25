@@ -23,25 +23,35 @@ def init_session():
     """Initialize session with any supported file."""
     file = request.files.get('file')
     z_col_req = request.form.get('z_column')
-    
+    crs_override = request.form.get('crs') or None
+
     if file:
         filename = secure_filename(file.filename)
         filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         try:
-            gdf, z_col = load_to_gdf(filepath, z_col_req)
+            gdf, z_col = load_to_gdf(filepath, z_col_req, crs_override=crs_override)
             in_projection = f"epsg:{gdf.crs.to_epsg()}" if gdf.crs.to_epsg() else gdf.crs.to_string()
             x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
+            all_cols = gdf.columns.tolist()
+            if 'geometry' in all_cols: all_cols.remove('geometry')
+            numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
+            preview_data = gdf[all_cols].head(5).to_dict(orient='records')
         except Exception as e:
             return jsonify({'error': str(e)}), 400
         finally:
-            if os.path.exists(filepath): os.remove(filepath)
+            if not current_app.config.get('TESTING') and os.path.exists(filepath):
+                os.remove(filepath)
     else:
         # Sample data
         test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'test.csv')
-        gdf, z_col = load_to_gdf(test_file)
+        gdf, z_col = load_to_gdf(test_file, z_col_req)
         in_projection = 'epsg:4326'
         x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
+        all_cols = gdf.columns.tolist()
+        if 'geometry' in all_cols: all_cols.remove('geometry')
+        numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
+        preview_data = gdf[all_cols].head(5).to_dict(orient='records')
     
     data_id = str(uuid.uuid4())
     with get_cache() as cache:
@@ -53,7 +63,10 @@ def init_session():
         'boundary': res['boundary'],
         'grid_stats': res['grid_stats'],
         'detected_crs': in_projection,
-        'detected_z': z_col
+        'detected_z': z_col,
+        'all_columns': all_cols,
+        'numeric_columns': numeric_cols,
+        'preview_data': preview_data
     })
 
 @api_bp.route('/zones/generate', methods=['POST'])

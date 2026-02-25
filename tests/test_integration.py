@@ -123,6 +123,10 @@ def test_session_init_demo(client):
     body = r.get_json()
     assert 'data_id' in body
     assert 'boundary' in body
+    assert 'all_columns' in body
+    assert 'numeric_columns' in body
+    assert 'preview_data' in body
+    assert isinstance(body['preview_data'], list)
 
 
 def test_session_init_with_file(client, fixture_csv):
@@ -135,6 +139,11 @@ def test_session_init_with_file(client, fixture_csv):
     body = r.get_json()
     assert 'data_id' in body
     assert 'boundary' in body
+    assert 'all_columns' in body
+    assert ['X', 'Y', 'Z'] == body['all_columns']
+    assert 'numeric_columns' in body
+    assert 'preview_data' in body
+    assert len(body['preview_data']) > 0
 
 
 # ── Full pipeline ─────────────────────────────────────────────────────────────
@@ -197,6 +206,36 @@ def test_export_shapefile(client, app):
 
 
 # ── Full browser flow mock ────────────────────────────────────────────────────
+
+@pytest.fixture()
+def fixture_csv_multi(tmp_path):
+    """Write a small WGS-84 CSV with multiple numeric columns."""
+    path = tmp_path / "multi.csv"
+    lines = ["X,Y,Yield,NDVI"] + [
+        f"{x},{y},{z:.4f},{z*0.1:.4f}"
+        for x, y, z in zip(FIXTURE_X, FIXTURE_Y, FIXTURE_Z)
+    ]
+    path.write_text("\n".join(lines))
+    return str(path)
+
+
+def test_session_change_z_column(client, fixture_csv_multi):
+    """Verify that changing the Z column updates the session data."""
+    # 1. Init with default (Yield)
+    with open(fixture_csv_multi, 'rb') as f:
+        r = client.post('/api/session/init', data={'file': (f, 'multi.csv')}, content_type='multipart/form-data')  
+    init1 = r.get_json()
+    assert init1['detected_z'] == 'Yield'
+    
+    # 2. Re-init with a different column ('NDVI')
+    with open(fixture_csv_multi, 'rb') as f:
+        r = client.post('/api/session/init', data={
+            'file': (f, 'multi.csv'),
+            'z_column': 'NDVI'
+        }, content_type='multipart/form-data')
+    init2 = r.get_json()
+    assert init2['detected_z'] == 'NDVI'
+    assert init2['data_id'] != init1['data_id']
 
 def test_full_browser_flow(client, fixture_csv):
     """
