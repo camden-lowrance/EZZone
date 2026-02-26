@@ -89,6 +89,7 @@ import { GeoJSON } from 'ol/format'
 import { Circle, Fill, Stroke, Style } from 'ol/style'
 import TileLayer from 'ol/layer/Tile'
 import XYZ from 'ol/source/XYZ'
+import { getArea as getSphereArea } from 'ol/sphere'
 
 const store = useZoneStore()
 
@@ -100,16 +101,21 @@ let snapInteraction = null
 let boundaryLayer = null
 let boundarySource = null
 
+const _useAcres = Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/')
+
 const area = computed(() => {
-  if (!boundarySource) return '0 m²'
+  if (!boundarySource) return _useAcres ? '0 ac' : '0 m²'
   const features = boundarySource.getFeatures()
-  if (!features.length) return '0 m²'
+  if (!features.length) return _useAcres ? '0 ac' : '0 m²'
   const geom = features[0].getGeometry()
-  const area = geom.getArea()
-  if (area > 1000000) {
-    return `${(area / 1000000).toFixed(2)} km²`
+  const sqMeters = getSphereArea(geom, { projection: 'EPSG:3857' })
+  if (_useAcres) {
+    return `${(sqMeters / 4046.856).toFixed(1)} ac`
   }
-  return `${area.toFixed(0)} m²`
+  if (sqMeters > 1000000) {
+    return `${(sqMeters / 1000000).toFixed(2)} km²`
+  }
+  return `${sqMeters.toFixed(0)} m²`
 })
 
 onMounted(() => {
