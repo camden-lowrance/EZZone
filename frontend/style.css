@@ -1,18 +1,24 @@
 /* EZZone - Modern Dark Theme */
 :root {
   /* Colors */
-  --bg-primary: #0f1419;
-  --bg-secondary: #1a1f26;
-  --bg-tertiary: #242b35;
-  --bg-elevated: #2d3640;
+  --bg-primary: #1c1e20;
+  --bg-secondary: #232628;
+  --bg-tertiary: #2a2d30;
+  --bg-elevated: #33373b;
   
   --text-primary: #e7e9ea;
   --text-secondary: #8b98a5;
   --text-muted: #5c6b7a;
   
-  --accent-primary: #1d9bf0;
-  --accent-hover: #1a8cd8;
-  --accent-green: #00ba7c;
+  --accent-primary: #00d4ff;
+  --accent-hover: #00bfe8;
+  --accent-green: #00ff88;
+  --accent-neon: #00ff88;
+  --accent-pink: #ff4db8;
+  --accent-cyan: #00d4ff;
+  --gradient-logo: linear-gradient(90deg, #00d4ff, #a855f7, #ff4db8);
+  --glow-green: 0 0 12px rgba(0, 255, 136, 0.5);
+  --glow-cyan: 0 0 12px rgba(0, 212, 255, 0.4);
   --accent-red: #f4212e;
   --accent-orange: #ff7a00;
   --accent-yellow: #ffd400;
@@ -195,13 +201,15 @@ h4 { font-size: 1rem; }
 }
 
 .file-drop:hover {
-  border-color: var(--accent-primary);
-  background: rgba(29, 155, 240, 0.05);
+  border-color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.05);
+  box-shadow: var(--glow-cyan);
 }
 
 .file-drop.dragover {
-  border-color: var(--accent-primary);
-  background: rgba(29, 155, 240, 0.1);
+  border-color: var(--accent-neon);
+  background: rgba(0, 255, 136, 0.07);
+  box-shadow: var(--glow-green);
 }
 
 /* Tables */

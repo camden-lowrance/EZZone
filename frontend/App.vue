@@ -60,7 +60,8 @@ const store = useZoneStore()
 
 .app-header {
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--accent-neon);
+  box-shadow: 0 1px 16px rgba(0, 255, 136, 0.15);
   padding: var(--space-md) 0;
   position: sticky;
   top: 0;
@@ -80,7 +81,7 @@ const store = useZoneStore()
 .logo-text {
   font-size: 1.5rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #e00203, #0870ae);
+  background: var(--gradient-logo);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

@@ -1,5 +1,10 @@
 <template>
   <div class="home-view">
+    <div v-if="!sessionReady" class="hero">
+      <img src="/img/ezzone_logo_large.png" alt="EZZone" class="hero-logo" />
+      <p class="hero-tagline">Agricultural Management Zone Generator</p>
+    </div>
+
     <div v-if="!sessionReady" class="grid grid-2">
       <!-- Upload Section -->
       <div class="card">
@@ -269,6 +274,26 @@ function formatValue(val) {
 .home-view {
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2xl) 0 var(--space-xl);
+  gap: var(--space-md);
+}
+
+.hero-logo {
+  width: min(420px, 80vw);
+  filter: drop-shadow(0 0 24px rgba(0, 255, 136, 0.4));
+}
+
+.hero-tagline {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .file-drop-icon {
