@@ -102,18 +102,20 @@ let boundaryLayer = null
 let boundarySource = null
 
 const _useAcres = Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/')
+const areaM2 = ref(0)
 
 const area = computed(() => {
-  if (!boundarySource) return _useAcres ? '0 ac' : '0 ha'
-  const features = boundarySource.getFeatures()
-  if (!features.length) return _useAcres ? '0 ac' : '0 ha'
-  const geom = features[0].getGeometry()
-  const sqMeters = getSphereArea(geom, { projection: 'EPSG:3857' })
-  if (_useAcres) {
-    return `${(sqMeters / 4046.856).toFixed(1)} ac`
-  }
-  return `${(sqMeters / 10000).toFixed(2)} ha`
+  if (areaM2.value <= 0) return _useAcres ? '0 ac' : '0 ha'
+  if (_useAcres) return `${(areaM2.value / 4046.856).toFixed(1)} ac`
+  return `${(areaM2.value / 10000).toFixed(2)} ha`
 })
+
+function updateArea() {
+  if (!boundarySource) { areaM2.value = 0; return }
+  const features = boundarySource.getFeatures()
+  if (!features.length) { areaM2.value = 0; return }
+  areaM2.value = getSphereArea(features[0].getGeometry(), { projection: 'EPSG:3857' })
+}
 
 onMounted(() => {
   initMap()
@@ -207,7 +209,7 @@ function updateInteractions() {
     currentInteraction.on('drawend', (e) => {
       // Clear previous boundary before adding new one
       boundarySource.clear()
-      setTimeout(() => syncBoundary(), 0)
+      setTimeout(() => { syncBoundary(); updateArea() }, 0)
     })
   } else if (drawMode.value === 'modify') {
     // Modify lets you drag vertices; Alt+click on a vertex deletes it
@@ -215,7 +217,7 @@ function updateInteractions() {
       source: boundarySource
     })
     map.addInteraction(currentInteraction)
-    currentInteraction.on('modifyend', () => syncBoundary())
+    currentInteraction.on('modifyend', () => { syncBoundary(); updateArea() })
   } else if (drawMode.value === 'delete') {
     // Click a feature to remove it entirely
     map.on('singleclick', handleDeleteClick)
@@ -243,11 +245,13 @@ function loadBoundary(geojson) {
   // Fit view to boundary
   const geom = feature.getGeometry()
   map.getView().fit(geom, { padding: [50, 50, 50, 50] })
+  updateArea()
 }
 
 function clearDrawing() {
   boundarySource.clear()
   store.results.boundary = null
+  updateArea()
 }
 
 function useDefaultBoundary() {
