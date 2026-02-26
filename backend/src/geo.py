@@ -12,7 +12,7 @@ import pyproj
 from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import Polygon, shape
-from sklearn.cluster import KMeans
+from jenkspy import jenks_breaks as jenks
 import matplotlib as mpl
 import matplotlib.colors as mcolors
 from osgeo import gdal
@@ -175,25 +175,32 @@ def interpolate_raster(
 
 
 def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
-    """Calculate GVF values for 2 to max_class classes using K-Means (faster than Jenks)."""
+    """Calculate GVF values for 2 to max_class classes using sampled Jenks."""
     n_unique = len(np.unique(stats))
     sdam = np.sum((stats - stats.mean()) ** 2)
     if sdam == 0:
         return [0.0]
 
-    # Reshape for sklearn
-    X = stats.reshape(-1, 1)
-    
+    # Sample for GVF to keep it fast (20k is plenty for GVF estimation)
+    if len(stats) > 20000:
+        sampled = np.random.choice(stats, 20000, replace=False)
+        sampled_sdam = np.sum((sampled - sampled.mean()) ** 2)
+    else:
+        sampled = stats
+        sampled_sdam = sdam
+
     gvf_arr = []
-    for k in range(2, min(max_class, n_unique) + 1):
-        kmeans = KMeans(n_clusters=k, n_init=1, random_state=42)
-        kmeans.fit(X)
-        
-        # Calculate SDCM (Sum of Squared Deviations from Class Means)
-        # Essentially the inertia_ attribute from KMeans
-        sdcm = kmeans.inertia_
-        
-        gvf = (sdam - sdcm) / sdam
+    for i in range(2, min(max_class, n_unique) + 1):
+        breaks = jenks(sampled, i)
+        classified = np.digitize(sampled, breaks)
+        classified = np.clip(classified, 1, i)
+        sdcm = sum(
+            np.sum((group - group.mean()) ** 2)
+            for cls in range(1, i + 1)
+            for group in [sampled[classified == cls]]
+            if len(group) > 0
+        )
+        gvf = (sampled_sdam - sdcm) / sampled_sdam
         gvf_arr.append(round(gvf, 3))
         if gvf >= 0.95:
             break
@@ -221,7 +228,7 @@ def classify_raster(
     array: np.ndarray,
     num_classes: int
 ) -> tuple[np.ndarray, list[str]]:
-    """Classify raster pixels using K-Means clustering."""
+    """Classify raster pixels using Jenks Natural Breaks on a sampled dataset."""
     from scipy.ndimage import median_filter
     
     flat = array.flatten()
@@ -231,45 +238,30 @@ def classify_raster(
     if len(valid_values) == 0:
         raise ValueError("No valid values in raster for classification")
 
-    # Reshape for sklearn
-    X = valid_values.reshape(-1, 1)
-    
-    # Use K-Means on the FULL dataset (it's fast enough now)
-    # n_init=1 is sufficient for simple 1D clustering
-    kmeans = KMeans(n_clusters=num_classes, n_init=1, random_state=42)
-    labels = kmeans.fit_predict(X)
-    
-    # K-Means labels aren't ordered by value, so we need to map them
-    centers = kmeans.cluster_centers_.flatten()
-    sorted_idx = np.argsort(centers)
-    rank_map = {old_label: new_rank + 1 for new_rank, old_label in enumerate(sorted_idx)}
-    
-    # Map raw labels to 1-based ranks (1=lowest value zone, k=highest)
-    ranked_labels = np.array([rank_map[l] for l in labels], dtype=np.int32)
+    # Sample for calculating breaks (20k is perfect for 1D distribution estimation)
+    if len(valid_values) > 20000:
+        sampled_for_breaks = np.random.choice(valid_values, 20000, replace=False)
+    else:
+        sampled_for_breaks = valid_values
+
+    actual_classes = min(num_classes, len(np.unique(sampled_for_breaks)))
+    breaks = jenks(sampled_for_breaks, actual_classes)
+
+    # Use NumPy's vectorized digitize to apply the breaks to the FULL dataset
+    valid_classification = np.digitize(valid_values, breaks)
+    valid_classification = np.clip(valid_classification, 1, actual_classes)
 
     classified = np.zeros(array.shape, dtype=np.int32)
-    classified.flat[valid_mask] = ranked_labels
+    classified.flat[valid_mask] = valid_classification
     
     # ── Smoothing Step ──
-    # Apply a median filter to remove 'salt and pepper' noise.
     classified = median_filter(classified, size=3)
 
-    # Generate breaks for legend based on sorted centers (approximate)
-    sorted_centers = np.sort(centers)
-    breaks = []
-    # Logic: Breaks are roughly halfway between centers
-    for i in range(len(sorted_centers) - 1):
-        mid = (sorted_centers[i] + sorted_centers[i+1]) / 2
-        breaks.append(round(mid, 1))
-        
+    # Format legend labels
+    breaks = [round(b, 1) for b in breaks]
     class_break_labels = []
-    # Add min/max for context
-    min_val = round(valid_values.min(), 1)
-    max_val = round(valid_values.max(), 1)
-    
-    full_breaks = [min_val] + breaks + [max_val]
-    for idx in range(len(full_breaks) - 1):
-        class_break_labels.append(f"{full_breaks[idx]} - {full_breaks[idx + 1]}")
+    for idx in range(len(breaks) - 1):
+        class_break_labels.append(f"{breaks[idx]} - {breaks[idx + 1]}")
 
     return classified, class_break_labels
 
