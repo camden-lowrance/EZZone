@@ -80,6 +80,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useZoneStore } from '../stores/zoneStore'
+import { STEPS } from '../steps.js'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import { Draw, Modify, Snap } from 'ol/interaction'
@@ -261,7 +262,7 @@ function useDefaultBoundary() {
 }
 
 function goBack() {
-  store.step = 1
+  store.step = STEPS.UPLOAD
 }
 
 async function continueToZones() {
@@ -269,10 +270,10 @@ async function continueToZones() {
     store.error = 'Please draw a boundary first'
     return
   }
-  
+
   try {
     await store.generateZones()
-    store.step = 3
+    store.step = STEPS.ZONES
   } catch (e) {
     // Error handled in store
   }

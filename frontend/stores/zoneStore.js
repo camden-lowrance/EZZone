@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { STEPS } from '../steps.js'
 
 export const useZoneStore = defineStore('zones', () => {
-  const step = ref(1)
+  const step = ref(STEPS.UPLOAD)
   const loading = ref(false)
   const error = ref(null)
   const dataId = ref(null)
   
   const config = ref({
-    numClasses: 3,
-    zColumn: '' // User can specify which column has the values
+    numClasses: 3
   })
   
   const results = ref({
@@ -26,16 +26,22 @@ export const useZoneStore = defineStore('zones', () => {
     gridStats: null
   })
 
-  async function initSession(file, zColumn = '', crs = '') {
+  async function initSession(files, zColumn = '', crs = '', useSample = false) {
     loading.value = true; error.value = null
     try {
       const formData = new FormData()
-      if (file) formData.append('file', file)
+      if (Array.isArray(files)) {
+        files.forEach(f => formData.append('file', f))
+      }
+      if (useSample) formData.append('use_sample', '1')
       if (zColumn) formData.append('z_column', zColumn)
       if (crs) formData.append('crs', crs)
       
       const res = await fetch('/api/session/init', { method: 'POST', body: formData })
-      if (!res.ok) throw new Error((await res.json()).error)
+      if (!res.ok) {
+        const body = await res.json()
+        throw new Error(body.error || 'An unexpected error occurred. Please try again.')
+      }
       
       const data = await res.json()
       dataId.value = data.data_id
@@ -68,13 +74,13 @@ export const useZoneStore = defineStore('zones', () => {
       results.value.gvf = data.gvf
       results.value.classBreaks = data.class_breaks
       results.value.legend = data.legend
-      step.value = 3
+      step.value = STEPS.ZONES
     } catch (e) { error.value = e.message } finally { loading.value = false }
   }
-  
+
   async function finalizeZones() {
     await generateZones()
-    step.value = 4
+    step.value = STEPS.FINALIZE
   }
   
   async function exportZones(format) {
@@ -110,7 +116,7 @@ export const useZoneStore = defineStore('zones', () => {
       legend: null,
       gridStats: null
     }
-    step.value = 1
+    step.value = STEPS.UPLOAD
     error.value = null
   }
   

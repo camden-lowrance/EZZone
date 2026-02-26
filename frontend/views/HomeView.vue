@@ -1,7 +1,9 @@
 <template>
   <div class="home-view">
     <div v-if="!sessionReady" class="hero">
-      <img src="/img/ezzone_logo_large.png" alt="EZZone" class="hero-logo" />
+      <div class="hero-logo-wrap">
+        <img src="/img/ezzone_logo_large.png" alt="EZZone" class="hero-logo" />
+      </div>
       <p class="hero-tagline">Agricultural Management Zone Generator</p>
     </div>
 
@@ -25,30 +27,17 @@
           <input
             ref="fileInput"
             type="file"
+            multiple
             style="display: none"
             @change="handleFileSelect"
           />
           <div class="file-drop-icon">📁</div>
-          <p v-if="!selectedFile">Drop your file here or click to browse</p>
-          <p v-else class="text-success">{{ selectedFile.name }}</p>
-          <p class="text-small text-muted">Supports all GDAL vector formats</p>
+          <p v-if="!selectedFiles.length">Drop files here or click to browse</p>
+          <p v-else-if="selectedFiles.length === 1" class="text-success">{{ selectedFiles[0].name }}</p>
+          <p v-else class="text-success">{{ selectedFiles.length }} files selected</p>
+          <p class="text-small text-muted">Supports all GDAL vector formats · Single or multiple ZIPs · Multiple files with matching schema</p>
         </div>
 
-        <div v-if="selectedFile" class="mt-md">
-          <div class="form-group">
-            <label class="form-label">Z Column (Optional)</label>
-            <input
-              v-model="store.config.zColumn"
-              type="text"
-              class="form-input"
-              placeholder="e.g. Yield, NDVI, EC"
-            />
-            <p class="text-small text-muted mt-sm">
-              The numeric column to use for zone generation.
-              We'll try to auto-detect it if left blank.
-            </p>
-          </div>
-        </div>
       </div>
 
       <!-- Configuration Section -->
@@ -73,7 +62,7 @@
             class="btn btn-secondary btn-large"
             @click="useSampleData"
           >
-            Use Sample Data
+            Use Sample Data (Blount Harvest)
           </button>
           <button
             class="btn btn-primary btn-large"
@@ -96,21 +85,11 @@
       <div class="summary-grid">
         <div class="summary-item">
           <span class="summary-label">File</span>
-          <span class="summary-value">{{ selectedFile ? selectedFile.name : 'Sample Data' }}</span>
+          <span class="summary-value">{{ selectedFiles.length === 0 ? 'Sample Data' : selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files` }}</span>
         </div>
         <div class="summary-item">
-          <label class="summary-label" :for="isFlatFile ? 'crs-input' : undefined">
-            {{ isFlatFile ? 'CRS' : 'Detected CRS' }}
-          </label>
-          <input
-            v-if="isFlatFile"
-            id="crs-input"
-            v-model="editableCrs"
-            type="text"
-            class="form-input"
-            placeholder="e.g. epsg:4326, epsg:32614"
-          />
-          <span v-else class="summary-value">{{ store.results.detectedCrs || 'Auto' }}</span>
+          <span class="summary-label">Detected CRS</span>
+          <span class="summary-value">{{ store.results.detectedCrs || 'Auto' }}</span>
         </div>
         <div class="summary-item summary-item-wide">
           <label class="summary-label" for="z-column-select">Value Column</label>
@@ -118,7 +97,7 @@
             <select
               v-if="store.results.allColumns.length"
               id="z-column-select"
-              v-model="editableZ"
+              v-model="store.results.detectedZ"
               class="form-input"
             >
               <option disabled value="">Select a column...</option>
@@ -136,14 +115,11 @@
             <input
               v-else
               id="z-column-select"
-              v-model="editableZ"
+              v-model="store.results.detectedZ"
               type="text"
               class="form-input"
               placeholder="e.g. Yield, NDVI, EC"
             />
-            <span class="detected-hint" v-if="store.results.detectedZ && !editableZ">
-              Detected: <strong>{{ store.results.detectedZ }}</strong>
-            </span>
           </div>
         </div>
       </div>
@@ -184,81 +160,81 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useZoneStore } from '../stores/zoneStore'
+import { STEPS } from '../steps.js'
 
 const store = useZoneStore()
 
 const isDragging = ref(false)
 const fileInput = ref(null)
-const selectedFile = ref(null)
+// Keep File objects outside Vue reactivity to prevent Proxy wrapping breaking FormData
+let rawFiles = []
+const selectedFiles = ref([]) // UI-only: stores {name, size} metadata
 const sessionReady = ref(false)
-const editableZ = ref('')
-const editableCrs = ref('')
+let lastProcessedZ = null
 
 const FLAT_FILE_EXTS = new Set(['csv', 'txt', 'tsv', 'xlsx', 'xls'])
 const isFlatFile = computed(() => {
-  if (!selectedFile.value) return false
-  const ext = selectedFile.value.name.split('.').pop().toLowerCase()
+  if (selectedFiles.value.length !== 1) return false
+  const ext = selectedFiles.value[0].name.split('.').pop().toLowerCase()
   return FLAT_FILE_EXTS.has(ext)
 })
 
-const canProcess = computed(() => !!selectedFile.value)
+const canProcess = computed(() => selectedFiles.value.length > 0)
 
 const otherColumns = computed(() => {
   const numericSet = new Set(store.results.numericColumns)
   return store.results.allColumns.filter(col => !numericSet.has(col))
 })
 
+function setFiles(fileList) {
+  rawFiles = Array.from(fileList)
+  selectedFiles.value = rawFiles.map(f => ({ name: f.name, size: f.size }))
+}
+
 function handleDrop(e) {
   isDragging.value = false
-  const files = e.dataTransfer.files
-  if (files.length) selectedFile.value = files[0]
+  if (e.dataTransfer.files.length) setFiles(e.dataTransfer.files)
 }
 
 function handleFileSelect(e) {
-  const files = e.target.files
-  if (files.length) selectedFile.value = files[0]
+  if (e.target.files.length) setFiles(e.target.files)
 }
 
 async function useSampleData() {
-  await store.initSession(null)
-  editableZ.value = store.results.detectedZ || ''
-  editableCrs.value = store.results.detectedCrs || ''
+  rawFiles = []
+  selectedFiles.value = []
+  await store.initSession([], '', '', true)
+  lastProcessedZ = store.results.detectedZ
   sessionReady.value = true
 }
 
 async function processFile() {
-  if (selectedFile.value) {
-    await store.initSession(selectedFile.value, store.config.zColumn)
+  if (rawFiles.length) {
+    await store.initSession(rawFiles)
     if (!store.error) {
-      editableZ.value = store.results.detectedZ || ''
-      editableCrs.value = store.results.detectedCrs || ''
+      lastProcessedZ = store.results.detectedZ
       sessionReady.value = true
     }
   }
 }
 
 async function continueToBoundary() {
-  const zChanged = editableZ.value && editableZ.value !== store.results.detectedZ
-  const crsChanged = isFlatFile.value && editableCrs.value && editableCrs.value !== store.results.detectedCrs
-
-  if (zChanged || crsChanged) {
-    store.config.zColumn = editableZ.value
+  if (store.results.detectedZ !== lastProcessedZ) {
     await store.initSession(
-      selectedFile.value || null,
-      editableZ.value,
-      isFlatFile.value ? editableCrs.value : ''
+      rawFiles.length ? rawFiles : [],
+      store.results.detectedZ
     )
     if (store.error) return
+    lastProcessedZ = store.results.detectedZ
   }
-  store.step = 2
+  store.step = STEPS.BOUNDARY
 }
 
 function startOver() {
   sessionReady.value = false
-  selectedFile.value = null
-  store.config.zColumn = ''
-  editableZ.value = ''
-  editableCrs.value = ''
+  rawFiles = []
+  selectedFiles.value = []
+  lastProcessedZ = null
   store.reset()
 }
 
@@ -284,9 +260,16 @@ function formatValue(val) {
   gap: var(--space-md);
 }
 
+.hero-logo-wrap {
+  background: #1c1e20;
+  border-radius: 1rem;
+  display: inline-flex;
+}
+
 .hero-logo {
-  width: min(420px, 80vw);
-  filter: drop-shadow(0 0 24px rgba(0, 255, 136, 0.4));
+  width: min(26rem, 80vw);
+  filter: drop-shadow(0 0 1.5rem rgba(0, 255, 136, 0.4));
+  display: block;
 }
 
 .hero-tagline {
@@ -335,8 +318,8 @@ function formatValue(val) {
 }
 
 .summary-label {
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  font-size: 0.875rem;
+  color: var(--accent-cyan);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -354,8 +337,8 @@ function formatValue(val) {
 }
 
 .detected-hint {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  font-size: 0.875rem;
+  color: var(--accent-green);
 }
 
 .preview-table-container {
@@ -368,7 +351,7 @@ function formatValue(val) {
 .preview-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 1rem;
 }
 
 .preview-table th,
@@ -380,9 +363,10 @@ function formatValue(val) {
 }
 
 .preview-table th {
-  background: var(--bg-secondary);
-  color: var(--text-muted);
+  background: var(--bg-elevated);
+  color: var(--accent-cyan);
   font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .preview-table tr:last-child td {

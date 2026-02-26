@@ -1,20 +1,19 @@
 <template>
   <div class="app">
-    <header class="app-header">
-      <div class="container flex items-center justify-between">
+    <header class="app-header" v-show="store.step !== STEPS.UPLOAD">
+      <div class="container flex items-center justify-center">
         <div class="logo">
-          <img src="/img/ezzone_logo_large.png" alt="EZZone" />
-          <span class="logo-text">EZZone</span>
+          <img src="/img/ezzone_logo_header.png" alt="EZZone" />
         </div>
       </div>
     </header>
-    
+
     <main class="app-main">
       <div class="container">
-        <HomeView v-if="store.step === 1" />
-        <DrawBoundaryView v-else-if="store.step === 2" />
-        <ZonesView v-else-if="store.step === 3" />
-        <FinalizeView v-else-if="store.step === 4" />
+        <HomeView v-if="store.step === STEPS.UPLOAD" />
+        <DrawBoundaryView v-else-if="store.step === STEPS.BOUNDARY" />
+        <ZonesView v-else-if="store.step === STEPS.ZONES" />
+        <FinalizeView v-else-if="store.step === STEPS.FINALIZE" />
       </div>
     </main>
     
@@ -33,9 +32,9 @@
     </div>
     
     <div v-if="store.error" class="error-toast">
-      <div class="alert alert-error">
+      <div class="alert alert-error" style="white-space: pre-line; position: relative; padding-right: 2.5rem">
         {{ store.error }}
-        <button @click="store.error = null" class="btn-close">&times;</button>
+        <button @click="store.error = null" class="btn-close" style="position: absolute; top: 0.5rem; right: 0.5rem">&times;</button>
       </div>
     </div>
   </div>
@@ -43,6 +42,7 @@
 
 <script setup>
 import { useZoneStore } from './stores/zoneStore'
+import { STEPS } from './steps.js'
 import HomeView from './views/HomeView.vue'
 import DrawBoundaryView from './views/DrawBoundaryView.vue'
 import ZonesView from './views/ZonesView.vue'
@@ -75,7 +75,8 @@ const store = useZoneStore()
 }
 
 .logo img {
-  height: 40px;
+  height: 3rem;
+  display: block;
 }
 
 .logo-text {
@@ -126,10 +127,12 @@ const store = useZoneStore()
 
 .error-toast {
   position: fixed;
-  bottom: var(--space-lg);
-  right: var(--space-lg);
+  top: var(--space-lg);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1001;
-  max-width: 400px;
+  max-width: 500px;
+  width: 90%;
 }
 
 .btn-close {

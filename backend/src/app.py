@@ -34,7 +34,28 @@ def create_app(test_config=None) -> Flask:
 
     # Register API blueprint
     from .api import api_bp
+    from .io_service import DataError
     app.register_blueprint(api_bp)
+
+    @app.errorhandler(DataError)
+    def handle_data_error(e):
+        return e.to_json(), 422
+
+    @app.errorhandler(400)
+    def bad_request(e):
+        return {'error': str(e.description), 'code': 'BAD_REQUEST'}, 400
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return {'error': 'Endpoint not found', 'code': 'NOT_FOUND'}, 404
+
+    @app.errorhandler(405)
+    def method_not_allowed(e):
+        return {'error': 'Method not allowed', 'code': 'METHOD_NOT_ALLOWED'}, 405
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        return {'error': 'An unexpected server error occurred.', 'code': 'SERVER_ERROR'}, 500
 
     # Serve static files for Vue SPA
     @app.route('/')

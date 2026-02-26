@@ -115,6 +115,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRef } from 'vue'
 import { useZoneStore } from '../stores/zoneStore'
+import { STEPS } from '../steps.js'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import VectorSource from 'ol/source/Vector.js'
@@ -235,12 +236,12 @@ async function exportShapefile() {
 }
 
 function goBack() {
-  store.step = 3
+  store.step = STEPS.ZONES
 }
 
 function startOver() {
   store.reset()
-  store.step = 1
+  store.step = STEPS.UPLOAD
 }
 </script>
 

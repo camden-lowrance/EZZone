@@ -100,6 +100,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRef } from 'vue'
 import { useZoneStore } from '../stores/zoneStore'
+import { STEPS } from '../steps.js'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -267,7 +268,7 @@ async function regenerateZones() {
 }
 
 function goBack() {
-  store.step = 2
+  store.step = STEPS.BOUNDARY
 }
 
 async function continueToFinalize() {
