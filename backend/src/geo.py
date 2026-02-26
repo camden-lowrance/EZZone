@@ -5,46 +5,70 @@ Core geospatial library for agricultural management zone generation.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import numpy as np
 import pyproj
-from scipy.interpolate import griddata
 import geopandas as gpd
-from shapely.geometry import Polygon, shape
-from jenkspy import jenks_breaks as jenks
 import matplotlib as mpl
 import matplotlib.colors as mcolors
-from osgeo import gdal
-from osgeo import osr
-from osgeo import ogr
+from shapely.geometry import Polygon, shape
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+from scipy.spatial import ConvexHull
+from scipy.ndimage import median_filter
+from jenkspy import jenks_breaks as jenks
+from osgeo import gdal, osr, ogr
+from rasterio import features
+from rasterio.transform import from_bounds
 
 gdal.UseExceptions()
 
+# ── Constants ────────────────────────────────────────────────────────────────
 
-def extrapolate_nans(x: np.ndarray, y: np.ndarray, v: np.ndarray) -> np.ndarray | None:
-    """Extrapolate NaN values in a grid using nearest neighbor interpolation."""
-    if np.ma.is_masked(v):
-        nans = v.mask
-    else:
-        nans = np.isnan(v)
-    notnans = np.logical_not(nans)
-    try:
-        v[nans] = griddata((x[notnans], y[notnans]), v[notnans],
-                           (x[nans], y[nans]), method='nearest').ravel()
-        return v
-    except ValueError:
-        return None
+DEFAULT_CRS = 'epsg:4326'
+WEB_MERCATOR_CRS = 'epsg:3857'
 
+JENKS_SAMPLE_SIZE = 10000
+GVF_THRESHOLD = 0.95
+SMOOTHING_KERNEL_SIZE = 3
+RESOLUTION_STEP = 0.25
+
+# ── Outlier Suppression ───────────────────────────────────────────────────────
+# Clipping to these percentiles ensures extreme spikes don't skew the zones.
+OUTLIER_PERCENTILE_LOW = 2
+OUTLIER_PERCENTILE_HIGH = 98
+
+# ── Processing Profiles ───────────────────────────────────────────────────────
+
+PROFILES = {
+    'fast': {
+        'max_points': 1000,
+        'target_pixels': 250,
+        'min_res': 1.0,
+        'gvf_samples': 5000,
+    },
+    'high': {
+        'max_points': 10000,
+        'target_pixels': 1500,
+        'min_res': 0.5,
+        'gvf_samples': 50000,
+    }
+}
+
+def get_active_profile():
+    name = os.environ.get('EZZONE_PROFILE', 'high').lower()
+    return PROFILES.get(name, PROFILES['high'])
+
+# ── Functions ────────────────────────────────────────────────────────────────
 
 def bound_json(
     x: np.ndarray,
     y: np.ndarray,
-    in_projection: str = 'epsg:4326',
-    out_projection: str = 'epsg:3857'
+    in_projection: str = DEFAULT_CRS,
+    out_projection: str = WEB_MERCATOR_CRS
 ) -> dict:
     """Create a convex-hull polygon GeoJSON boundary from x and y coordinate arrays."""
-    from scipy.spatial import ConvexHull
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -62,8 +86,8 @@ def bound_json(
 
 def reproject_poly(
     obj: Any,
-    in_projection: str = 'epsg:3857',
-    out_projection: str = 'epsg:4326'
+    in_projection: str = WEB_MERCATOR_CRS,
+    out_projection: str = DEFAULT_CRS
 ) -> Polygon:
     """Reproject a polygon from one CRS to another."""
     if isinstance(obj, dict):
@@ -95,39 +119,14 @@ def reproject_array(x: np.ndarray, y: np.ndarray, inp: str, outp: str) -> np.nda
 def utmzone(xy: tuple | Polygon) -> pyproj.CRS:
     """Get the UTM CRS for the given coordinates."""
     if isinstance(xy, Polygon):
-        gdf = gpd.GeoDataFrame(geometry=[xy], crs='epsg:4326')
+        gdf = gpd.GeoDataFrame(geometry=[xy], crs=DEFAULT_CRS)
     else:
         gdf = gpd.GeoDataFrame(
             geometry=gpd.points_from_xy([xy[0]], [xy[1]]),
-            crs='epsg:4326',
+            crs=DEFAULT_CRS,
         )
     return gdf.estimate_utm_crs()
 
-
-import os
-
-# ── Processing Profiles ───────────────────────────────────────────────────────
-
-PROFILES = {
-    'fast': {
-        'max_points': 1000,
-        'target_pixels': 250,
-        'min_res': 1.0,
-        'gvf_samples': 5000,
-    },
-    'high': {
-        'max_points': 10000,
-        'target_pixels': 1500,
-        'min_res': 0.5,
-        'gvf_samples': 50000,
-    }
-}
-
-def get_active_profile():
-    name = os.environ.get('EZZONE_PROFILE', 'high').lower()
-    return PROFILES.get(name, PROFILES['high'])
-
-RESOLUTION_STEP = 0.25
 
 def interpolate_raster(
     x: np.ndarray,
@@ -137,9 +136,7 @@ def interpolate_raster(
     outp: str,
     poly: Polygon
 ) -> tuple[np.ndarray, list[float]]:
-    """Interpolate point data to a regular raster grid with adaptive resolution."""
-    from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
-    
+    """Interpolate point data to a regular raster grid with adaptive resolution and masking."""
     profile = get_active_profile()
     target_pixels = profile['target_pixels']
     min_res = profile['min_res']
@@ -150,7 +147,6 @@ def interpolate_raster(
     width = xmax - xmin
     height = ymax - ymin
     
-    # Adaptive resolution: Target ~target_pixels across the longest dimension.
     raw_res = max(min_res, max(width, height) / target_pixels)
     resolution = np.ceil(raw_res / RESOLUTION_STEP) * RESOLUTION_STEP
 
@@ -165,28 +161,44 @@ def interpolate_raster(
     lin_interp = LinearNDInterpolator(points, z)
     gridz = lin_interp(gridx, gridy)
     
-    # Fill Nans using nearest neighbor
+    # Fill Nans using nearest neighbor (Extrapolation)
     if np.isnan(gridz).any():
         near_interp = NearestNDInterpolator(points, z)
         nan_mask = np.isnan(gridz)
         gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
+
+    # ── Masking ──
+    # Ensure pixels outside the boundary are NaN so they don't influence classification
+    mask = features.geometry_mask([poly], out_shape=(ny, nx), 
+                                  transform=from_bounds(xmin, ymin, xmax, ymax, nx, ny),
+                                  invert=True)
+    gridz[~mask] = np.nan
 
     return gridz, [xmin, ymin, xmax, ymax]
 
 
 def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
     """Calculate GVF values for 2 to max_class classes using sampled Jenks."""
-    n_unique = len(np.unique(stats))
-    sdam = np.sum((stats - stats.mean()) ** 2)
+    # Filter to valid (inside boundary) values only
+    valid_stats = stats[~np.isnan(stats)]
+    if len(valid_stats) == 0:
+        return [0.0]
+
+    # ── Outlier Suppression ──
+    low, high = np.percentile(valid_stats, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
+    valid_stats = np.clip(valid_stats, low, high)
+
+    n_unique = len(np.unique(valid_stats))
+    sdam = np.sum((valid_stats - valid_stats.mean()) ** 2)
     if sdam == 0:
         return [0.0]
 
-    # Sample for GVF to keep it fast (20k is plenty for GVF estimation)
-    if len(stats) > 20000:
-        sampled = np.random.choice(stats, 20000, replace=False)
+    # Sample for GVF to keep it fast
+    if len(valid_stats) > JENKS_SAMPLE_SIZE:
+        sampled = np.random.choice(valid_stats, JENKS_SAMPLE_SIZE, replace=False)
         sampled_sdam = np.sum((sampled - sampled.mean()) ** 2)
     else:
-        sampled = stats
+        sampled = valid_stats
         sampled_sdam = sdam
 
     gvf_arr = []
@@ -202,7 +214,7 @@ def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
         )
         gvf = (sampled_sdam - sdcm) / sampled_sdam
         gvf_arr.append(round(gvf, 3))
-        if gvf >= 0.95:
+        if gvf >= GVF_THRESHOLD:
             break
     return gvf_arr
 
@@ -228,19 +240,25 @@ def classify_raster(
     array: np.ndarray,
     num_classes: int
 ) -> tuple[np.ndarray, list[str]]:
-    """Classify raster pixels using Jenks Natural Breaks on a sampled dataset."""
-    from scipy.ndimage import median_filter
+    """Classify raster pixels using Jenks Natural Breaks on a masked dataset."""
+    # ── Smoothing Step First ──
+    # Smooth before classification to remove interpolation noise
+    array_smoothed = median_filter(array, size=SMOOTHING_KERNEL_SIZE)
     
-    flat = array.flatten()
+    flat = array_smoothed.flatten()
     valid_mask = ~np.isnan(flat)
     valid_values = flat[valid_mask]
 
     if len(valid_values) == 0:
         raise ValueError("No valid values in raster for classification")
 
-    # Sample for calculating breaks (20k is perfect for 1D distribution estimation)
-    if len(valid_values) > 20000:
-        sampled_for_breaks = np.random.choice(valid_values, 20000, replace=False)
+    # ── Outlier Suppression ──
+    low, high = np.percentile(valid_values, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
+    valid_values = np.clip(valid_values, low, high)
+
+    # Sample for calculating breaks (10k is robust for 1D distribution estimation)
+    if len(valid_values) > JENKS_SAMPLE_SIZE:
+        sampled_for_breaks = np.random.choice(valid_values, JENKS_SAMPLE_SIZE, replace=False)
     else:
         sampled_for_breaks = valid_values
 
@@ -254,10 +272,7 @@ def classify_raster(
     classified = np.zeros(array.shape, dtype=np.int32)
     classified.flat[valid_mask] = valid_classification
     
-    # ── Smoothing Step ──
-    classified = median_filter(classified, size=3)
-
-    # Format legend labels
+    # Format legend labels using the actual min/max of the masked data
     breaks = [round(b, 1) for b in breaks]
     class_break_labels = []
     for idx in range(len(breaks) - 1):
@@ -330,5 +345,5 @@ def polygonize_classes_fast(
     if gdf_clipped.empty:
         raise ValueError("No valid zone geometries after clipping")
 
-    gdf_wgs84 = gdf_clipped.to_crs('epsg:4326')
+    gdf_wgs84 = gdf_clipped.to_crs(DEFAULT_CRS)
     return gdf_wgs84.sort_values('zone').reset_index(drop=True)
