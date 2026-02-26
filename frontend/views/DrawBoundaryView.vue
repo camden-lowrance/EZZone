@@ -101,7 +101,7 @@ let snapInteraction = null
 let boundaryLayer = null
 let boundarySource = null
 
-const _useAcres = Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/')
+const _useAcres = new Intl.Locale(navigator.language).region === 'US'
 const areaM2 = ref(0)
 
 const area = computed(() => {
