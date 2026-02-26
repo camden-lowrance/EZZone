@@ -104,18 +104,15 @@ let boundarySource = null
 const _useAcres = Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/')
 
 const area = computed(() => {
-  if (!boundarySource) return _useAcres ? '0 ac' : '0 m²'
+  if (!boundarySource) return _useAcres ? '0 ac' : '0 ha'
   const features = boundarySource.getFeatures()
-  if (!features.length) return _useAcres ? '0 ac' : '0 m²'
+  if (!features.length) return _useAcres ? '0 ac' : '0 ha'
   const geom = features[0].getGeometry()
   const sqMeters = getSphereArea(geom, { projection: 'EPSG:3857' })
   if (_useAcres) {
     return `${(sqMeters / 4046.856).toFixed(1)} ac`
   }
-  if (sqMeters > 1000000) {
-    return `${(sqMeters / 1000000).toFixed(2)} km²`
-  }
-  return `${sqMeters.toFixed(0)} m²`
+  return `${(sqMeters / 10000).toFixed(2)} ha`
 })
 
 onMounted(() => {
