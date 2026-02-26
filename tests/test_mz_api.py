@@ -107,9 +107,11 @@ def test_export_shapefile():
 
 
 def test_with_sample_data():
-    """Test with the real test.csv sample data."""
-    test_csv = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tests', 'fixtures', 'test.csv')
-    x, y, z = np.loadtxt(test_csv, skiprows=1, delimiter=",", unpack=True)
+    """Test with the real scott_harvest_2023 sample data."""
+    import geopandas as gpd
+    geojson = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tests', 'fixtures', 'scott_harvest_2023.geojson')
+    gdf = gpd.read_file(geojson)
+    x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf['harvestMoisture'].values
 
     result = generate_zones(
         x=x, y=y, z=z,

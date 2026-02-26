@@ -44,7 +44,7 @@ def init_session():
                 os.remove(filepath)
     else:
         # Sample data
-        test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'test.csv')
+        test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'scott_harvest_2023.geojson')
         gdf, z_col = load_to_gdf(test_file, z_col_req)
         in_projection = 'epsg:4326'
         x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
