@@ -105,9 +105,9 @@ const _useAcres = new Intl.Locale(navigator.language).region === 'US'
 const areaM2 = ref(0)
 
 const area = computed(() => {
-  if (areaM2.value <= 0) return _useAcres ? '0 ac' : '0 ha'
-  if (_useAcres) return `${(areaM2.value / 4046.856).toFixed(1)} ac`
-  return `${(areaM2.value / 10000).toFixed(2)} ha`
+  if (areaM2.value <= 0) return _useAcres ? '0 acres' : '0 hectares'
+  if (_useAcres) return `${(areaM2.value / 4046.856).toFixed(1)} acres`
+  return `${(areaM2.value / 10000).toFixed(2)} hectares`
 })
 
 function updateArea() {
