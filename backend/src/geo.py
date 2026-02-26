@@ -18,6 +18,8 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 from scipy.spatial import ConvexHull
 from scipy.ndimage import median_filter
 from jenkspy import jenks_breaks as jenks
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 from osgeo import gdal, osr, ogr
 from rasterio import features
 from rasterio.transform import from_bounds
@@ -34,8 +36,12 @@ GVF_THRESHOLD = 0.95
 SMOOTHING_KERNEL_SIZE = 3
 RESOLUTION_STEP = 0.25
 
+# ── Spatial Clustering ───────────────────────────────────────────────────────
+# Higher weight makes zones more contiguous/compact but less sensitive to yield.
+# Lower weight (e.g. 0.1) stays closer to the yield values.
+SPATIAL_WEIGHT = 0.4 
+
 # ── Outlier Suppression ───────────────────────────────────────────────────────
-# Clipping to these percentiles ensures extreme spikes don't skew the zones.
 OUTLIER_PERCENTILE_LOW = 2
 OUTLIER_PERCENTILE_HIGH = 98
 
@@ -72,12 +78,10 @@ def bound_json(
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
-    # Use scipy for extremely fast convex hull calculation on raw points
     points_coords = np.column_stack([x, y])
     hull = ConvexHull(points_coords)
     hull_points = points_coords[hull.vertices]
     
-    # Create the polygon and reproject
     poly = Polygon(hull_points)
     hull_gs = gpd.GeoSeries([poly], crs=in_projection).to_crs(out_projection)
 
@@ -157,18 +161,14 @@ def interpolate_raster(
     yi = np.linspace(ymin, ymax, ny)
     gridx, gridy = np.meshgrid(xi, yi)
     
-    # Fast interpolation
     lin_interp = LinearNDInterpolator(points, z)
     gridz = lin_interp(gridx, gridy)
     
-    # Fill Nans using nearest neighbor (Extrapolation)
     if np.isnan(gridz).any():
         near_interp = NearestNDInterpolator(points, z)
         nan_mask = np.isnan(gridz)
         gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
 
-    # ── Masking ──
-    # Ensure pixels outside the boundary are NaN so they don't influence classification
     mask = features.geometry_mask([poly], out_shape=(ny, nx), 
                                   transform=from_bounds(xmin, ymin, xmax, ymax, nx, ny),
                                   invert=True)
@@ -179,12 +179,10 @@ def interpolate_raster(
 
 def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
     """Calculate GVF values for 2 to max_class classes using sampled Jenks."""
-    # Filter to valid (inside boundary) values only
     valid_stats = stats[~np.isnan(stats)]
     if len(valid_stats) == 0:
         return [0.0]
 
-    # ── Outlier Suppression ──
     low, high = np.percentile(valid_stats, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
     valid_stats = np.clip(valid_stats, low, high)
 
@@ -193,7 +191,6 @@ def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
     if sdam == 0:
         return [0.0]
 
-    # Sample for GVF to keep it fast
     if len(valid_stats) > JENKS_SAMPLE_SIZE:
         sampled = np.random.choice(valid_stats, JENKS_SAMPLE_SIZE, replace=False)
         sampled_sdam = np.sum((sampled - sampled.mean()) ** 2)
@@ -238,45 +235,77 @@ def json_legend(class_breaks: list[str]) -> list[list[str]]:
 
 def classify_raster(
     array: np.ndarray,
-    num_classes: int
+    num_classes: int,
+    bounds: list[float]
 ) -> tuple[np.ndarray, list[str]]:
-    """Classify raster pixels using Jenks Natural Breaks on a masked dataset."""
-    # ── Smoothing Step First ──
-    # Smooth before classification to remove interpolation noise
+    """
+    Classify raster pixels using Spatial-Spectral K-Means clustering.
+    Includes X, Y, and Value in the classification space.
+    """
+    # ── Pre-Classification Smoothing ──
     array_smoothed = median_filter(array, size=SMOOTHING_KERNEL_SIZE)
     
-    flat = array_smoothed.flatten()
-    valid_mask = ~np.isnan(flat)
-    valid_values = flat[valid_mask]
+    ny, nx = array.shape
+    xmin, ymin, xmax, ymax = bounds
+    
+    xi = np.linspace(xmin, xmax, nx)
+    yi = np.linspace(ymin, ymax, ny)
+    gridx, gridy = np.meshgrid(xi, yi)
 
-    if len(valid_values) == 0:
+    valid_mask = ~np.isnan(array_smoothed)
+    z_vals = array_smoothed[valid_mask]
+    x_vals = gridx[valid_mask]
+    y_vals = gridy[valid_mask]
+
+    if len(z_vals) == 0:
         raise ValueError("No valid values in raster for classification")
 
     # ── Outlier Suppression ──
-    low, high = np.percentile(valid_values, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
-    valid_values = np.clip(valid_values, low, high)
+    low, high = np.percentile(z_vals, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
+    z_clipped = np.clip(z_vals, low, high)
 
-    # Sample for calculating breaks (10k is robust for 1D distribution estimation)
-    if len(valid_values) > JENKS_SAMPLE_SIZE:
-        sampled_for_breaks = np.random.choice(valid_values, JENKS_SAMPLE_SIZE, replace=False)
-    else:
-        sampled_for_breaks = valid_values
+    # ── Feature Vector Preparation ──
+    # [X, Y, Z]
+    features_raw = np.column_stack([x_vals, y_vals, z_clipped])
+    
+    # Scale features to comparable ranges
+    scaler = StandardScaler()
+    scaled = scaler.fit_transform(features_raw)
+    
+    # Apply Spatial Weighting
+    # X and Y are indices 0 and 1. We multiply them by weight.
+    scaled[:, 0:2] *= SPATIAL_WEIGHT
 
-    actual_classes = min(num_classes, len(np.unique(sampled_for_breaks)))
-    breaks = jenks(sampled_for_breaks, actual_classes)
-
-    # Use NumPy's vectorized digitize to apply the breaks to the FULL dataset
-    valid_classification = np.digitize(valid_values, breaks)
-    valid_classification = np.clip(valid_classification, 1, actual_classes)
+    # ── K-Means Clustering ──
+    # Since we use spatial coordinates, Jenks (1D only) is no longer suitable.
+    # K-Means works perfectly for this multi-dimensional space.
+    kmeans = KMeans(n_clusters=num_classes, n_init=10, random_state=42)
+    labels = kmeans.fit_predict(scaled)
+    
+    # Order labels by mean Yield (Z) so Zone 1 is always lowest yield
+    centers_orig_scale = scaler.inverse_transform(kmeans.cluster_centers_)
+    z_centers = centers_orig_scale[:, 2]
+    rank_map = {old_label: new_rank + 1 for new_rank, old_label in enumerate(np.argsort(z_centers))}
+    
+    ranked_labels = np.array([rank_map[l] for l in labels], dtype=np.int32)
 
     classified = np.zeros(array.shape, dtype=np.int32)
-    classified.flat[valid_mask] = valid_classification
+    classified.flat[valid_mask.ravel()] = ranked_labels
     
-    # Format legend labels using the actual min/max of the masked data
-    breaks = [round(b, 1) for b in breaks]
+    # ── Final Smoothing ──
+    classified = median_filter(classified, size=SMOOTHING_KERNEL_SIZE)
+
+    # ── Determine Natural Breaks for Legend ──
+    # Even though we used K-Means, users expect Jenks-like legend ranges.
+    # We find the min/max of the resulting clusters.
     class_break_labels = []
-    for idx in range(len(breaks) - 1):
-        class_break_labels.append(f"{breaks[idx]} - {breaks[idx + 1]}")
+    for cls in range(1, num_classes + 1):
+        cluster_data = z_vals[ranked_labels == cls]
+        if len(cluster_data) > 0:
+            c_min, c_max = round(cluster_data.min(), 1), round(cluster_data.max(), 1)
+            class_break_labels.append(f"{c_min} - {c_max}")
+        else:
+            class_break_labels.append("N/A")
 
     return classified, class_break_labels
 
@@ -316,8 +345,7 @@ def polygonize_classes_fast(
 
     gdal.Polygonize(band, None, layer, field_index, [], callback=None)
 
-    # Collect all polygonized features into a GeoDataFrame and batch-clip
-    features = []
+    features_list = []
     layer.ResetReading()
     for feature in layer:
         geom = feature.GetGeometryRef()
@@ -326,19 +354,18 @@ def polygonize_classes_fast(
             continue
         geom_json = geom.ExportToJson()
         shapely_geom = shape(json.loads(geom_json))
-        features.append({'zone': class_label, 'geometry': shapely_geom})
+        features_list.append({'zone': class_label, 'geometry': shapely_geom})
 
     ds = None
     vector_ds = None
 
-    if not features:
+    if not features_list:
         raise ValueError("No valid zone geometries after polygonization")
 
-    gdf_raw = gpd.GeoDataFrame(features, crs=utm_crs)
+    gdf_raw = gpd.GeoDataFrame(features_list, crs=utm_crs)
     gdf_clipped = gpd.clip(gdf_raw, boundary_utm)
     gdf_clipped = gdf_clipped[~gdf_clipped.geometry.is_empty & gdf_clipped.geometry.notna()]
 
-    # Explode any MultiPolygons to individual Polygon rows
     gdf_clipped = gdf_clipped.explode(index_parts=False).reset_index(drop=True)
     gdf_clipped = gdf_clipped[gdf_clipped.geometry.type == 'Polygon']
 

@@ -104,7 +104,7 @@ def generate_zones(
     gvf_arr = gvf_array(sampled_values, 8)
 
     # Classify raster pixels and polygonize
-    classified, class_breaks = classify_raster(array, num_classes)
+    classified, class_breaks = classify_raster(array, num_classes, raster_bounds)
     gdf = polygonize_classes_fast(classified, raster_bounds, boundary_utm, utm_crs)
 
     # Convert to GeoJSON
