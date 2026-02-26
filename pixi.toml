@@ -26,6 +26,7 @@ pytest = "==9.0.2"
 diskcache = ">=5.6.3,<6"
 pyogrio = ">=0.12.1,<0.13"
 openpyxl = ">=3.1.5,<4"
+scikit-learn = ">=1.6.1,<2"
 
 [tasks]
 # Frontend
@@ -43,8 +44,8 @@ dev = { depends-on = ["dev-fe", "dev-be"] }
 start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run"], cwd = "backend" }
 
 # Testing
-test = "pytest tests/"
-test-cov = "pytest tests/ --cov=backend.src --cov-report=html"
+test = { cmd = "pytest tests/", env = { EZZONE_PROFILE = "fast" } }
+test-cov = { cmd = "pytest tests/ --cov=backend.src --cov-report=html", env = { EZZONE_PROFILE = "fast" } }
 
 # Utilities
 clean = "rmdir /s /q dist"

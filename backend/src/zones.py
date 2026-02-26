@@ -25,6 +25,7 @@ from .geo import (
     gvf_array,
     gvf_json,
     json_legend,
+    get_active_profile
 )
 
 
@@ -39,6 +40,24 @@ def _extract_geometry(boundary: dict) -> dict:
     return boundary  # raw geometry (Polygon, etc.)
 
 
+def get_metadata(
+    x: np.ndarray,
+    y: np.ndarray,
+    in_projection: str = 'epsg:4326',
+    boundary_geojson: str | dict | None = None
+) -> dict:
+    """Fast metadata extraction (boundary and stats) without heavy processing."""
+    if boundary_geojson is None:
+        boundary = bound_json(x, y, in_projection=in_projection, out_projection=in_projection)
+    else:
+        boundary = json.loads(boundary_geojson) if isinstance(boundary_geojson, str) else boundary_geojson
+
+    return {
+        'boundary': boundary,
+        'num_points': len(x)
+    }
+
+
 def generate_zones(
     x: np.ndarray,
     y: np.ndarray,
@@ -49,12 +68,6 @@ def generate_zones(
 ) -> dict[str, Any]:
     """
     Generate agricultural management zones from point data.
-
-    Algorithm:
-    1. Interpolate scattered points to raster
-    2. Classify pixels directly with Jenks breaks
-    3. Polygonize classified raster
-    4. Clip to boundary, reproject to WGS84, export GeoJSON
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -69,17 +82,26 @@ def generate_zones(
     boundary_geom = _extract_geometry(boundary)
 
     # Reproject boundary to WGS84 and determine UTM zone
-    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection='epsg:4326')
+    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection='epsg:4326') 
     utm_crs = utmzone(boundary_wgs84)
-    boundary_utm = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection=utm_crs)
+    boundary_utm = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection=utm_crs)       
 
     # Interpolate point data to raster
     array, raster_bounds = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
 
-    # Compute GVF for 2-10 classes based on pixel values
+    # Compute GVF for 2-8 classes based on sampled pixel values (to speed up "elbow" detection)
     flat_values = array.flatten()
     valid_values = flat_values[~np.isnan(flat_values)]
-    gvf_arr = gvf_array(valid_values, 10)
+    
+    # Sample based on active profile
+    profile = get_active_profile()
+    max_gvf = profile['gvf_samples']
+    if len(valid_values) > max_gvf:
+        sampled_values = np.random.choice(valid_values, max_gvf, replace=False)
+    else:
+        sampled_values = valid_values
+    
+    gvf_arr = gvf_array(sampled_values, 8)
 
     # Classify raster pixels and polygonize
     classified, class_breaks = classify_raster(array, num_classes)
@@ -100,7 +122,6 @@ def generate_zones(
         },
         'legend': legend,
     }
-
 
 def export_zones(
     zones_geojson: dict,

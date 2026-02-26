@@ -14,6 +14,7 @@ export const useZoneStore = defineStore('zones', () => {
   
   const results = ref({
     detectedCrs: null,
+    isCrsGuessed: false,
     detectedZ: null,
     allColumns: [],
     numericColumns: [],
@@ -23,14 +24,14 @@ export const useZoneStore = defineStore('zones', () => {
     gvf: [],
     classBreaks: [],
     legend: null,
-    gridStats: null
+    numPoints: 0
   })
 
   async function initSession(files, zColumn = '', crs = '', useSample = false) {
     loading.value = true; error.value = null
     try {
       const formData = new FormData()
-      if (Array.isArray(files)) {
+      if (Array.isArray(files) && files.length) {
         files.forEach(f => formData.append('file', f))
       }
       if (useSample) formData.append('use_sample', '1')
@@ -46,8 +47,9 @@ export const useZoneStore = defineStore('zones', () => {
       const data = await res.json()
       dataId.value = data.data_id
       results.value.boundary = data.boundary
-      results.value.gridStats = data.grid_stats
+      results.value.numPoints = data.num_points
       results.value.detectedCrs = data.detected_crs
+      results.value.isCrsGuessed = data.is_crs_guessed || false
       results.value.detectedZ = data.detected_z
       results.value.allColumns = data.all_columns || []
       results.value.numericColumns = data.numeric_columns || []
@@ -105,6 +107,7 @@ export const useZoneStore = defineStore('zones', () => {
     dataId.value = null
     results.value = {
       detectedCrs: null,
+      isCrsGuessed: false,
       detectedZ: null,
       allColumns: [],
       numericColumns: [],
@@ -114,7 +117,7 @@ export const useZoneStore = defineStore('zones', () => {
       gvf: [],
       classBreaks: [],
       legend: null,
-      gridStats: null
+      numPoints: 0
     }
     step.value = STEPS.UPLOAD
     error.value = null

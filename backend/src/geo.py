@@ -12,7 +12,7 @@ import pyproj
 from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import Polygon, shape
-from jenkspy import jenks_breaks as jenks
+from sklearn.cluster import KMeans
 import matplotlib as mpl
 import matplotlib.colors as mcolors
 from osgeo import gdal
@@ -44,16 +44,20 @@ def bound_json(
     out_projection: str = 'epsg:3857'
 ) -> dict:
     """Create a convex-hull polygon GeoJSON boundary from x and y coordinate arrays."""
+    from scipy.spatial import ConvexHull
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
-    points = gpd.GeoSeries(gpd.points_from_xy(x, y), crs=in_projection)
-    hull = gpd.GeoSeries(
-        [points.union_all().convex_hull],
-        crs=in_projection,
-    ).to_crs(out_projection).iloc[0]
+    # Use scipy for extremely fast convex hull calculation on raw points
+    points_coords = np.column_stack([x, y])
+    hull = ConvexHull(points_coords)
+    hull_points = points_coords[hull.vertices]
+    
+    # Create the polygon and reproject
+    poly = Polygon(hull_points)
+    hull_gs = gpd.GeoSeries([poly], crs=in_projection).to_crs(out_projection)
 
-    return hull.__geo_interface__
+    return hull_gs.iloc[0].__geo_interface__
 
 
 def reproject_poly(
@@ -100,7 +104,30 @@ def utmzone(xy: tuple | Polygon) -> pyproj.CRS:
     return gdf.estimate_utm_crs()
 
 
-DEFAULT_RESOLUTION = 5.0
+import os
+
+# ── Processing Profiles ───────────────────────────────────────────────────────
+
+PROFILES = {
+    'fast': {
+        'max_points': 1000,
+        'target_pixels': 250,
+        'min_res': 1.0,
+        'gvf_samples': 5000,
+    },
+    'high': {
+        'max_points': 10000,
+        'target_pixels': 1500,
+        'min_res': 0.5,
+        'gvf_samples': 50000,
+    }
+}
+
+def get_active_profile():
+    name = os.environ.get('EZZONE_PROFILE', 'high').lower()
+    return PROFILES.get(name, PROFILES['high'])
+
+RESOLUTION_STEP = 0.25
 
 def interpolate_raster(
     x: np.ndarray,
@@ -110,13 +137,22 @@ def interpolate_raster(
     outp: str,
     poly: Polygon
 ) -> tuple[np.ndarray, list[float]]:
-    """Interpolate point data to a regular raster grid."""
+    """Interpolate point data to a regular raster grid with adaptive resolution."""
+    from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+    
+    profile = get_active_profile()
+    target_pixels = profile['target_pixels']
+    min_res = profile['min_res']
+
     points = reproject_array(x, y, inp, outp)
     xmin, ymin, xmax, ymax = poly.bounds
 
     width = xmax - xmin
     height = ymax - ymin
-    resolution = DEFAULT_RESOLUTION
+    
+    # Adaptive resolution: Target ~target_pixels across the longest dimension.
+    raw_res = max(min_res, max(width, height) / target_pixels)
+    resolution = np.ceil(raw_res / RESOLUTION_STEP) * RESOLUTION_STEP
 
     nx = max(2, round(width / resolution))
     ny = max(2, round(height / resolution))
@@ -124,34 +160,42 @@ def interpolate_raster(
     xi = np.linspace(xmin, xmax, nx)
     yi = np.linspace(ymin, ymax, ny)
     gridx, gridy = np.meshgrid(xi, yi)
-
-    gridz = griddata(points, z, (gridx, gridy), method='linear')
-    extrapolate_nans(gridx, gridy, gridz)
+    
+    # Fast interpolation
+    lin_interp = LinearNDInterpolator(points, z)
+    gridz = lin_interp(gridx, gridy)
+    
+    # Fill Nans using nearest neighbor
+    if np.isnan(gridz).any():
+        near_interp = NearestNDInterpolator(points, z)
+        nan_mask = np.isnan(gridz)
+        gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
 
     return gridz, [xmin, ymin, xmax, ymax]
 
 
 def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
-    """Calculate GVF values for 2 to max_class classes using vectorized numpy."""
+    """Calculate GVF values for 2 to max_class classes using K-Means (faster than Jenks)."""
     n_unique = len(np.unique(stats))
     sdam = np.sum((stats - stats.mean()) ** 2)
     if sdam == 0:
         return [0.0]
 
+    # Reshape for sklearn
+    X = stats.reshape(-1, 1)
+    
     gvf_arr = []
-    for i in range(2, min(max_class, n_unique) + 1):
-        breaks = jenks(stats, i)
-        classified = np.digitize(stats, breaks)
-        classified = np.clip(classified, 1, i)
-        sdcm = sum(
-            np.sum((group - group.mean()) ** 2)
-            for cls in range(1, i + 1)
-            for group in [stats[classified == cls]]
-            if len(group) > 0
-        )
+    for k in range(2, min(max_class, n_unique) + 1):
+        kmeans = KMeans(n_clusters=k, n_init=1, random_state=42)
+        kmeans.fit(X)
+        
+        # Calculate SDCM (Sum of Squared Deviations from Class Means)
+        # Essentially the inertia_ attribute from KMeans
+        sdcm = kmeans.inertia_
+        
         gvf = (sdam - sdcm) / sdam
-        gvf_arr.append(round(gvf, 2))
-        if gvf >= 0.9:
+        gvf_arr.append(round(gvf, 3))
+        if gvf >= 0.95:
             break
     return gvf_arr
 
@@ -177,7 +221,9 @@ def classify_raster(
     array: np.ndarray,
     num_classes: int
 ) -> tuple[np.ndarray, list[str]]:
-    """Classify raster pixels directly using Jenks Natural Breaks."""
+    """Classify raster pixels using K-Means clustering."""
+    from scipy.ndimage import median_filter
+    
     flat = array.flatten()
     valid_mask = ~np.isnan(flat)
     valid_values = flat[valid_mask]
@@ -185,19 +231,45 @@ def classify_raster(
     if len(valid_values) == 0:
         raise ValueError("No valid values in raster for classification")
 
-    actual_classes = min(num_classes, len(np.unique(valid_values)))
-    breaks = jenks(valid_values, actual_classes)
-
-    valid_classification = np.digitize(valid_values, breaks)
-    valid_classification = np.clip(valid_classification, 1, actual_classes)
+    # Reshape for sklearn
+    X = valid_values.reshape(-1, 1)
+    
+    # Use K-Means on the FULL dataset (it's fast enough now)
+    # n_init=1 is sufficient for simple 1D clustering
+    kmeans = KMeans(n_clusters=num_classes, n_init=1, random_state=42)
+    labels = kmeans.fit_predict(X)
+    
+    # K-Means labels aren't ordered by value, so we need to map them
+    centers = kmeans.cluster_centers_.flatten()
+    sorted_idx = np.argsort(centers)
+    rank_map = {old_label: new_rank + 1 for new_rank, old_label in enumerate(sorted_idx)}
+    
+    # Map raw labels to 1-based ranks (1=lowest value zone, k=highest)
+    ranked_labels = np.array([rank_map[l] for l in labels], dtype=np.int32)
 
     classified = np.zeros(array.shape, dtype=np.int32)
-    classified.flat[valid_mask] = valid_classification
+    classified.flat[valid_mask] = ranked_labels
+    
+    # ── Smoothing Step ──
+    # Apply a median filter to remove 'salt and pepper' noise.
+    classified = median_filter(classified, size=3)
 
-    breaks = [round(b, 1) for b in breaks]
+    # Generate breaks for legend based on sorted centers (approximate)
+    sorted_centers = np.sort(centers)
+    breaks = []
+    # Logic: Breaks are roughly halfway between centers
+    for i in range(len(sorted_centers) - 1):
+        mid = (sorted_centers[i] + sorted_centers[i+1]) / 2
+        breaks.append(round(mid, 1))
+        
     class_break_labels = []
-    for idx in range(len(breaks) - 1):
-        class_break_labels.append(f"{breaks[idx]} - {breaks[idx + 1]}")
+    # Add min/max for context
+    min_val = round(valid_values.min(), 1)
+    max_val = round(valid_values.max(), 1)
+    
+    full_breaks = [min_val] + breaks + [max_val]
+    for idx in range(len(full_breaks) - 1):
+        class_break_labels.append(f"{full_breaks[idx]} - {full_breaks[idx + 1]}")
 
     return classified, class_break_labels
 

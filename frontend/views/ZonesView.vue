@@ -21,12 +21,12 @@
             type="range"
             class="slider"
             min="2"
-            max="15"
+            max="8"
             @change="regenerateZones"
           />
           <div class="range-labels">
             <span>2</span>
-            <span>15</span>
+            <span>8</span>
           </div>
         </div>
         
@@ -138,55 +138,76 @@ let map = null
 let zonesLayer = null
 let zonesSource = null
 
-const chartData = computed(() => ({
-  labels: store.results.gvf.map((_, i) => i + 2),
-  datasets: [{
-    label: 'GVF',
-    data: store.results.gvf.map(g => g[1]),
-    borderColor: '#1d9bf0',
-    backgroundColor: 'rgba(29, 155, 240, 0.1)',
-    fill: true,
-    tension: 0.3
-  }]
-}))
+const chartData = computed(() => {
+  const labels = store.results.gvf.map((_, i) => i + 2)
+  const gvfValues = store.results.gvf.map(g => g[1])
+  const currentClasses = store.config.numClasses
 
-const chartOptions = {
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'GVF Score',
+        data: gvfValues,
+        borderColor: '#00ff88',
+        backgroundColor: 'rgba(0, 255, 136, 0.1)',
+        borderWidth: 3,
+        pointBackgroundColor: labels.map(l => l === currentClasses ? '#00ff88' : '#1c1e20'),
+        pointBorderColor: labels.map(l => l === currentClasses ? '#ffffff' : '#00ff88'),
+        pointRadius: labels.map(l => l === currentClasses ? 8 : 4),
+        pointHoverRadius: 10,
+        fill: true,
+        tension: 0.4
+      }
+    ]
+  }
+})
+
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: {
-      display: false
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#1c1e20',
+      titleColor: '#00f3ff',
+      bodyColor: '#ffffff',
+      borderColor: '#38444d',
+      borderWidth: 1,
+      displayColors: false,
+      callbacks: {
+        label: (context) => `GVF Score: ${context.parsed.y.toFixed(3)}`
+      }
     }
   },
   scales: {
     x: {
       title: {
         display: true,
-        text: 'Number of Classes'
+        text: 'Number of Classes',
+        color: '#8b98a5',
+        font: { size: 12, weight: 'bold' }
       },
-      grid: {
-        color: 'rgba(56, 68, 77, 0.5)'
-      },
-      ticks: {
-        color: '#8b98a5'
-      }
+      grid: { color: 'rgba(56, 68, 77, 0.3)' },
+      ticks: { color: '#8b98a5' }
     },
     y: {
       title: {
         display: true,
-        text: 'GVF'
+        text: 'Grouping Quality (GVF)',
+        color: '#8b98a5',
+        font: { size: 12, weight: 'bold' }
       },
-      grid: {
-        color: 'rgba(56, 68, 77, 0.5)'
-      },
-      ticks: {
-        color: '#8b98a5'
+      grid: { color: 'rgba(56, 68, 77, 0.3)' },
+      ticks: { 
+        color: '#8b98a5',
+        callback: (value) => (value * 100).toFixed(0) + '%'
       },
       min: 0,
-      max: 1
+      max: 1.05
     }
   }
-}
+}))
 
 const classBreakTable = computed(() => store.results.classBreaks)
 

@@ -88,8 +88,18 @@
           <span class="summary-value">{{ selectedFiles.length === 0 ? 'Sample Data' : selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files` }}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">Detected CRS</span>
-          <span class="summary-value">{{ store.results.detectedCrs || 'Auto' }}</span>
+          <label class="summary-label" :for="store.results.isCrsGuessed ? 'crs-input' : undefined">
+            {{ store.results.isCrsGuessed ? 'CRS (Guessed)' : 'Detected CRS' }}
+          </label>
+          <input
+            v-if="store.results.isCrsGuessed"
+            id="crs-input"
+            v-model="editableCrs"
+            type="text"
+            class="form-input"
+            placeholder="e.g. epsg:4326"
+          />
+          <span v-else class="summary-value">{{ store.results.detectedCrs || 'Auto' }}</span>
         </div>
         <div class="summary-item summary-item-wide">
           <label class="summary-label" for="z-column-select">Value Column</label>
@@ -170,7 +180,10 @@ const fileInput = ref(null)
 let rawFiles = []
 const selectedFiles = ref([]) // UI-only: stores {name, size} metadata
 const sessionReady = ref(false)
+const isSampleMode = ref(false)
+const editableCrs = ref('')
 let lastProcessedZ = null
+let lastProcessedCrs = null
 
 const FLAT_FILE_EXTS = new Set(['csv', 'txt', 'tsv', 'xlsx', 'xls'])
 const isFlatFile = computed(() => {
@@ -203,38 +216,53 @@ function handleFileSelect(e) {
 async function useSampleData() {
   rawFiles = []
   selectedFiles.value = []
+  isSampleMode.value = true
   await store.initSession([], '', '', true)
   lastProcessedZ = store.results.detectedZ
+  editableCrs.value = store.results.detectedCrs
+  lastProcessedCrs = store.results.detectedCrs
   sessionReady.value = true
 }
 
 async function processFile() {
   if (rawFiles.length) {
+    isSampleMode.value = false
     await store.initSession(rawFiles)
     if (!store.error) {
       lastProcessedZ = store.results.detectedZ
+      editableCrs.value = store.results.detectedCrs
+      lastProcessedCrs = store.results.detectedCrs
       sessionReady.value = true
     }
   }
 }
 
 async function continueToBoundary() {
-  if (store.results.detectedZ !== lastProcessedZ) {
+  const zChanged = store.results.detectedZ !== lastProcessedZ
+  const crsChanged = editableCrs.value !== lastProcessedCrs
+
+  if (zChanged || crsChanged) {
     await store.initSession(
       rawFiles.length ? rawFiles : [],
-      store.results.detectedZ
+      store.results.detectedZ,
+      editableCrs.value,
+      isSampleMode.value
     )
     if (store.error) return
     lastProcessedZ = store.results.detectedZ
+    lastProcessedCrs = editableCrs.value
   }
   store.step = STEPS.BOUNDARY
 }
 
 function startOver() {
   sessionReady.value = false
+  isSampleMode.value = false
   rawFiles = []
   selectedFiles.value = []
   lastProcessedZ = null
+  editableCrs.value = ''
+  lastProcessedCrs = null
   store.reset()
 }
 

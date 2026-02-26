@@ -10,13 +10,56 @@ import numpy as np
 from flask import Blueprint, request, Response, current_app
 from werkzeug.utils import secure_filename
 from diskcache import Cache
-from .zones import generate_zones, export_zones
+from .zones import generate_zones, export_zones, get_metadata
 from .io_service import load_to_gdf, load_multiple_to_gdf, extract_zip_contents, DataError
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 def get_cache():
     return Cache(current_app.config['CACHE_FOLDER'])
+
+def _process_gdf_to_res(gdf, z_col_req):
+    """Common logic to extract data from GDF and cache it."""
+    # Identify Z column
+    if z_col_req in gdf.columns:
+        z_col = z_col_req
+        if not np.issubdtype(gdf[z_col].dtype, np.number):
+            import pandas as pd
+            gdf[z_col] = pd.to_numeric(gdf[z_col].astype(str).str.replace(',', '.'), errors='coerce')
+    else:
+        from .io_service import _detect_z_col
+        exclude_cols = [gdf.geometry.name] + getattr(gdf, '_coord_cols', [])
+        z_col = _detect_z_col(gdf, exclude=exclude_cols)
+    
+    if not z_col or gdf[z_col].isna().all():
+        raise DataError(f'No valid numeric data found in column "{z_col_req or z_col}".', 'MISSING_Z_COL')
+
+    in_projection = f"epsg:{gdf.crs.to_epsg()}" if (gdf.crs and gdf.crs.to_epsg()) else (gdf.crs.to_string() if gdf.crs else 'epsg:4326')
+    x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
+    all_cols = gdf.columns.tolist()
+    if 'geometry' in all_cols: all_cols.remove('geometry')
+    numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
+    preview_data = gdf[all_cols].head(5).to_dict(orient='records')
+
+    data_id = str(uuid.uuid4())
+    with get_cache() as cache:
+        cache.set(data_id, {
+            'x': x, 'y': y, 'z': z, 
+            'crs': in_projection
+        }, expire=86400)
+    
+    meta = get_metadata(x, y, in_projection=in_projection)
+    return {
+        'data_id': data_id,
+        'boundary': meta['boundary'],
+        'num_points': meta['num_points'],
+        'detected_crs': in_projection,
+        'is_crs_guessed': gdf.attrs.get('is_crs_guessed', False),
+        'detected_z': z_col,
+        'all_columns': all_cols,
+        'numeric_columns': numeric_cols,
+        'preview_data': preview_data
+    }
 
 @api_bp.route('/session/init', methods=['POST'])
 def init_session():
@@ -25,35 +68,30 @@ def init_session():
     crs_override = request.form.get('crs') or None
     files = request.files.getlist('file')
     use_sample = request.form.get('use_sample') == '1'
+
+    # Case 1: New Upload
     if files and files[0].filename:
         upload_folder = current_app.config['UPLOAD_FOLDER']
         saved_paths = []
-        tmpdir = None
-        for f in files:
-            filename = secure_filename(f.filename)
-            filepath = os.path.join(upload_folder, filename)
-            f.save(filepath)
-            saved_paths.append(filepath)
         tmpdirs = []
         try:
+            for f in files:
+                filename = secure_filename(f.filename)
+                filepath = os.path.join(upload_folder, filename)
+                f.save(filepath)
+                saved_paths.append(filepath)
+            
             load_paths = []
             for p in saved_paths:
                 if p.lower().endswith('.zip'):
                     shp_paths, td = extract_zip_contents(p)
-                    if not shp_paths:
-                        raise ValueError(f'No shapefiles found inside {os.path.basename(p)}.')
                     load_paths.extend(shp_paths)
                     tmpdirs.append(td)
                 else:
                     load_paths.append(p)
 
-            gdf, z_col = load_multiple_to_gdf(load_paths, z_col_req, crs_override=crs_override)
-            in_projection = f"epsg:{gdf.crs.to_epsg()}" if gdf.crs.to_epsg() else gdf.crs.to_string()
-            x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
-            all_cols = gdf.columns.tolist()
-            if 'geometry' in all_cols: all_cols.remove('geometry')
-            numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
-            preview_data = gdf[all_cols].head(5).to_dict(orient='records')
+            gdf, _ = load_multiple_to_gdf(load_paths, z_col_req, crs_override=crs_override)
+            return _process_gdf_to_res(gdf, z_col_req)
         except DataError as e:
             return e.to_json(), 422
         except Exception as e:
@@ -65,38 +103,18 @@ def init_session():
             import shutil
             for td in tmpdirs:
                 shutil.rmtree(td, ignore_errors=True)
+                
+    # Case 2: Sample Data
     elif use_sample:
-        # Sample data (only when explicitly requested)
         test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'blount_harvest_agi.zip')
         shp_paths, tmpdir_sample = extract_zip_contents(test_file)
         try:
-            gdf, z_col = load_multiple_to_gdf(shp_paths, z_col_req)
+            gdf, _ = load_multiple_to_gdf(shp_paths, z_col_req)
+            return _process_gdf_to_res(gdf, z_col_req)
         finally:
             import shutil; shutil.rmtree(tmpdir_sample, ignore_errors=True)
-        in_projection = 'epsg:4326'
-        x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
-        all_cols = gdf.columns.tolist()
-        if 'geometry' in all_cols: all_cols.remove('geometry')
-        numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
-        preview_data = gdf[all_cols].head(5).to_dict(orient='records')
-    else:
-        return {'error': 'No valid files found in your upload. Please upload a supported vector file (Shapefile, GeoJSON, CSV, etc.).', 'code': 'NO_VALID_FILES'}, 400
-
-    data_id = str(uuid.uuid4())
-    with get_cache() as cache:
-        cache.set(data_id, {'x': x, 'y': y, 'z': z, 'crs': in_projection}, expire=86400)
-    
-    res = generate_zones(x, y, z, in_projection=in_projection)
-    return {
-        'data_id': data_id,
-        'boundary': res['boundary'],
-        'grid_stats': res['grid_stats'],
-        'detected_crs': in_projection,
-        'detected_z': z_col,
-        'all_columns': all_cols,
-        'numeric_columns': numeric_cols,
-        'preview_data': preview_data
-    }
+            
+    return {'error': 'No valid files found in your upload.', 'code': 'NO_VALID_FILES'}, 400
 
 @api_bp.route('/zones/generate', methods=['POST'])
 def generate():

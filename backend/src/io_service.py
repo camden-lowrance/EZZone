@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
+from .geo import get_active_profile
 
 
 class DataError(Exception):
@@ -34,10 +35,22 @@ def _detect_coord_cols(columns: list[str]) -> tuple[str, str] | None:
     return (x_col, y_col) if (x_col and y_col) else None
 
 def _detect_z_col(df: pd.DataFrame, exclude: list[str]) -> str | None:
-    """Choose the best numeric column for values."""
+    """Choose the best numeric column for values, avoiding coordinates."""
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    exclude_lower = {c.lower() for c in exclude}
-    candidates = [c for c in numeric_cols if c.lower() not in exclude_lower]
+    
+    # Standard exclusions (geometry + detected coords)
+    exclude_set = {c.lower() for c in exclude}
+    
+    # Aggressive exclusions (any variation of X/Y/Lon/Lat)
+    COORDS_KEYWORDS = {'x', 'y', 'lon', 'lat', 'longitude', 'latitude', 'easting', 'northing', 'long'}
+    
+    candidates = []
+    for c in numeric_cols:
+        c_lower = c.lower()
+        if c_lower in exclude_set: continue
+        if c_lower in COORDS_KEYWORDS: continue
+        candidates.append(c)
+        
     return candidates[0] if candidates else (numeric_cols[0] if numeric_cols else None)
 
 def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str | None = None) -> tuple[gpd.GeoDataFrame, str]:
@@ -68,25 +81,51 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
         if not coords:
             raise DataError('Could not find X/Y or Lat/Lon columns. Expected columns named X, Y, Lon, Lat, Longitude, Latitude, Easting, or Northing.', 'MISSING_COORDS')
         
-        # Clean numeric values (handle common string formats like commas for decimals)
+        # Clean numeric values
         for col in coords:
             if df[col].dtype == object:
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
         
         df = df.dropna(subset=list(coords))
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[coords[0]], df[coords[1]]))
-        gdf.set_crs(crs_override or 'epsg:4326', inplace=True)
-        # Store coordinate column names to exclude them from Z detection later
-        gdf._coord_cols = list(coords)
+        gdf.attrs['_coord_cols'] = list(coords)
     else:
-        gdf._coord_cols = []
+        gdf.attrs['_coord_cols'] = []
+
+    # Detection/Override Logic
+    is_guessed = False
+    if crs_override:
+        gdf.set_crs(crs_override, allow_override=True, inplace=True)
+    elif gdf.crs is None:
+        is_guessed = True
+        # Basic Lat/Lon detection for files with missing CRS
+        x_min, x_max = gdf.geometry.x.min(), gdf.geometry.x.max()
+        y_min, y_max = gdf.geometry.y.min(), gdf.geometry.y.max()
+        
+        if -180 <= x_min <= 180 and -180 <= x_max <= 180 and \
+           -90 <= y_min <= 90 and -90 <= y_max <= 90:
+            gdf.set_crs('epsg:4326', inplace=True)
+        else:
+            # Default to 4326 but it's a weak guess (might be UTM)
+            gdf.set_crs('epsg:4326', inplace=True)
+    
+    gdf.attrs['is_crs_guessed'] = is_guessed
 
     # Ensure point geometries
     if not all(gdf.geometry.type == 'Point'):
         gdf.geometry = gdf.geometry.centroid
     
-    if gdf.crs is None:
-        gdf.set_crs('epsg:4326', inplace=True)
+    # ── Point Sampling Optimization ──
+    # Sample based on active profile fidelity.
+    profile = get_active_profile()
+    max_pts = profile['max_points']
+    if len(gdf) > max_pts:
+        saved_coords = gdf.attrs.get('_coord_cols', [])
+        saved_guessed = gdf.attrs.get('is_crs_guessed', False)
+        gdf = gdf.sample(n=max_pts, random_state=42).copy()
+        # Explicitly restore metadata
+        gdf.attrs['_coord_cols'] = saved_coords
+        gdf.attrs['is_crs_guessed'] = saved_guessed
     
     # Identify Z column
     if z_col_req in gdf.columns:
@@ -94,7 +133,7 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
         if not pd.api.types.is_numeric_dtype(gdf[z_col]):
             gdf[z_col] = pd.to_numeric(gdf[z_col].astype(str).str.replace(',', '.'), errors='coerce')
     else:
-        exclude_cols = [gdf.geometry.name] + getattr(gdf, '_coord_cols', [])
+        exclude_cols = [gdf.geometry.name] + gdf.attrs.get('_coord_cols', [])
         z_col = _detect_z_col(gdf, exclude=exclude_cols)
     
     if not z_col or gdf[z_col].isna().all():
@@ -160,13 +199,14 @@ def load_multiple_to_gdf(filepaths: list[str], z_col_req: str | None = None, crs
         raise DataError(f'No loadable vector files found. Skipped: {skipped_names}', 'NO_LOADABLE_FILES')
 
     combined = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=gdfs[0].crs)
-    combined._coord_cols = getattr(gdfs[0], '_coord_cols', [])
+    combined.attrs['is_crs_guessed'] = gdfs[0].attrs.get('is_crs_guessed', False)
+    combined.attrs['_coord_cols'] = gdfs[0].attrs.get('_coord_cols', [])
 
     # Re-detect z col on combined
     if z_col_req in combined.columns:
         z_col = z_col_req
     else:
-        exclude_cols = [combined.geometry.name] + combined._coord_cols
+        exclude_cols = [combined.geometry.name] + combined.attrs['_coord_cols']
         z_col = _detect_z_col(combined, exclude=exclude_cols)
 
     if not z_col or combined[z_col].isna().all():
