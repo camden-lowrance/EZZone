@@ -2,7 +2,7 @@
 authors = ["camdenl <admin@vvvanguards.com>"]
 channels = ["conda-forge"]
 name = "ezzone-pyanywhere"
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64"]
 version = "0.1.0"
 
 [dependencies]
@@ -49,3 +49,9 @@ test-cov = { cmd = "pytest tests/ --cov=backend.src --cov-report=html", env = { 
 
 # Utilities
 clean = "rmdir /s /q dist"
+
+[target.linux-64.dependencies]
+gunicorn = ">=23.0.0,<24"
+
+[target.linux-64.tasks]
+start-prod = "gunicorn --bind 0.0.0.0:$PORT 'src.app:create_app()' --chdir backend"
