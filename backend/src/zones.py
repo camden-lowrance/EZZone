@@ -64,7 +64,8 @@ def generate_zones(
     z: np.ndarray,
     in_projection: str = 'epsg:4326',
     boundary_geojson: str | dict | None = None,
-    num_classes: int = 3
+    num_classes: int = 3,
+    z_col: str = 'value',
 ) -> dict[str, Any]:
     """
     Generate agricultural management zones from point data.
@@ -104,10 +105,15 @@ def generate_zones(
     gvf_arr = gvf_array(sampled_values, 8)
 
     # Classify raster pixels and polygonize
-    classified, class_breaks = classify_raster(array, num_classes)
+    classified, class_breaks, class_ranges = classify_raster(array, num_classes)
     gdf = polygonize_classes_fast(classified, raster_bounds, boundary_utm, utm_crs)
 
-    # Convert to GeoJSON
+    # Embed per-zone value ranges as columns before converting to GeoJSON
+    range_min = {cls: rng[0] for cls, rng in enumerate(class_ranges, start=1)}
+    range_max = {cls: rng[1] for cls, rng in enumerate(class_ranges, start=1)}
+    gdf[f"{z_col}_min"] = gdf['zone'].map(range_min)
+    gdf[f"{z_col}_max"] = gdf['zone'].map(range_max)
+
     zones_geojson = json.loads(gdf.to_json())
     legend = json_legend(class_breaks)
 
@@ -139,5 +145,5 @@ def export_zones(
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fname in os.listdir(tmpdir):
                     zf.write(os.path.join(tmpdir, fname), fname)
-        return buf.getvalue()
+            return buf.getvalue()
     raise ValueError(f"Unsupported format: {format}")

@@ -44,8 +44,9 @@ def _process_gdf_to_res(gdf, z_col_req):
     data_id = str(uuid.uuid4())
     with get_cache() as cache:
         cache.set(data_id, {
-            'x': x, 'y': y, 'z': z, 
-            'crs': in_projection
+            'x': x, 'y': y, 'z': z,
+            'crs': in_projection,
+            'z_col': z_col,
         }, expire=86400)
     
     meta = get_metadata(x, y, in_projection=in_projection)
@@ -125,7 +126,8 @@ def generate():
         raw['x'], raw['y'], raw['z'],
         in_projection=raw['crs'],
         boundary_geojson=data.get('boundary_geojson'),
-        num_classes=int(data.get('num_classes', 3))
+        num_classes=int(data.get('num_classes', 3)),
+        z_col=raw.get('z_col', 'value'),
     )
     
     with get_cache() as cache:

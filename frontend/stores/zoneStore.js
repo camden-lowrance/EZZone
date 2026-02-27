@@ -108,7 +108,10 @@ export const useZoneStore = defineStore('zones', () => {
       const a = document.createElement('a')
       a.href = url
       a.download = `zones.${format === 'geojson' ? 'geojson' : 'zip'}`
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (e) { error.value = e.message }
   }
   

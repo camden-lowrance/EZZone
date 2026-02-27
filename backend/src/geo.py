@@ -271,16 +271,19 @@ def classify_raster(
 
     # ── Determine Natural Breaks for Legend ──
     class_break_labels = []
+    class_break_ranges = []
     # K-Means doesn't have "breaks" in 1D space, so we use cluster min/max
     for cls in range(1, num_classes + 1):
         cluster_data = z_vals[ranked_labels == cls]
         if len(cluster_data) > 0:
-            c_min, c_max = round(cluster_data.min(), 1), round(cluster_data.max(), 1)
-            class_break_labels.append(f"{c_min} - {c_max}")
+            c_min, c_max = round(float(cluster_data.min()), 4), round(float(cluster_data.max()), 4)
+            class_break_labels.append(f"{round(c_min, 1)} - {round(c_max, 1)}")
+            class_break_ranges.append((c_min, c_max))
         else:
             class_break_labels.append("N/A")
+            class_break_ranges.append((None, None))
 
-    return classified, class_break_labels
+    return classified, class_break_labels, class_break_ranges
 
 
 def _swallow_small_zones(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
