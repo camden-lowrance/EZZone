@@ -1,0 +1,51 @@
+[workspace]
+authors = ["camdenl <admin@vvvanguards.com>"]
+channels = ["conda-forge"]
+name = "ezzone-pyanywhere"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[dependencies]
+python = "==3.14.3"
+flask = "==3.1.3"
+numpy = "==2.4.2"
+pandas = "==3.0.1"
+scipy = "==1.17.1"
+pyproj = "==3.7.2"
+shapely = "==2.1.2"
+rasterio = "==1.5.0"
+gdal = "==3.12.2"
+geojson = "==3.2.0"
+jenkspy = "==0.4.1"
+geopandas = "==1.1.2"
+matplotlib = "==3.10.8"
+werkzeug = "==3.1.6"
+flask-session = "==0.8.0"
+python-dotenv = "==1.2.1"
+pytest = "==9.0.2"
+diskcache = ">=5.6.3,<6"
+pyogrio = ">=0.12.1,<0.13"
+openpyxl = ">=3.1.5,<4"
+scikit-learn = ">=1.6.1,<2"
+
+[tasks]
+# Frontend
+install-fe = "npm install"
+build = "npm run build"
+dev-fe = { cmd = ["npm", "run", "dev"], cwd = "." }
+preview = "npm run preview"
+
+# Backend
+dev-be = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--reload", "--debug"], cwd = "backend" }
+serve = { cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run", "--port", "5000"], cwd = "backend" }
+
+# Full Stack
+dev = { depends-on = ["dev-fe", "dev-be"] }
+start = { depends-on = ["build"], cmd = ["python", "-m", "flask", "--app", "src.app:create_app", "run"], cwd = "backend" }
+
+# Testing
+test = { cmd = "pytest tests/", env = { EZZONE_PROFILE = "fast" } }
+test-cov = { cmd = "pytest tests/ --cov=backend.src --cov-report=html", env = { EZZONE_PROFILE = "fast" } }
+
+# Utilities
+clean = "rmdir /s /q dist"

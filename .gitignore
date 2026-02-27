@@ -1,0 +1,16 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+*.log
+.DS_Store
+.vscode/
+.idea/
+.aider*
+backend/instance/
