@@ -178,38 +178,37 @@ def interpolate_raster(
 
 
 def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
-    """Calculate GVF values for 2 to max_class classes using sampled Jenks."""
-    valid_stats = stats[~np.isnan(stats)]
-    if len(valid_stats) == 0:
+    """Calculate GVF values for 2 to max_class classes using K-Means (inertia-based)."""
+    # Filter to valid (inside boundary) values only
+    valid_mask = ~np.isnan(stats)
+    z_vals = stats[valid_mask]
+    if len(z_vals) == 0:
         return [0.0]
 
-    low, high = np.percentile(valid_stats, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
-    valid_stats = np.clip(valid_stats, low, high)
+    # Sample for GVF to keep it fast
+    profile = get_active_profile()
+    max_gvf = profile['gvf_samples']
+    
+    if len(z_vals) > max_gvf:
+        sampled = np.random.choice(z_vals, max_gvf, replace=False)
+    else:
+        sampled = z_vals
 
-    n_unique = len(np.unique(valid_stats))
-    sdam = np.sum((valid_stats - valid_stats.mean()) ** 2)
+    low, high = np.percentile(sampled, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
+    sampled = np.clip(sampled, low, high)
+
+    sdam = np.sum((sampled - sampled.mean()) ** 2)
     if sdam == 0:
         return [0.0]
 
-    if len(valid_stats) > JENKS_SAMPLE_SIZE:
-        sampled = np.random.choice(valid_stats, JENKS_SAMPLE_SIZE, replace=False)
-        sampled_sdam = np.sum((sampled - sampled.mean()) ** 2)
-    else:
-        sampled = valid_stats
-        sampled_sdam = sdam
-
+    X = sampled.reshape(-1, 1)
+    
     gvf_arr = []
-    for i in range(2, min(max_class, n_unique) + 1):
-        breaks = jenks(sampled, i)
-        classified = np.digitize(sampled, breaks)
-        classified = np.clip(classified, 1, i)
-        sdcm = sum(
-            np.sum((group - group.mean()) ** 2)
-            for cls in range(1, i + 1)
-            for group in [sampled[classified == cls]]
-            if len(group) > 0
-        )
-        gvf = (sampled_sdam - sdcm) / sampled_sdam
+    for k in range(2, min(max_class, len(np.unique(sampled))) + 1):
+        kmeans = KMeans(n_clusters=k, n_init=1, random_state=42)
+        kmeans.fit(X)
+        sdcm = kmeans.inertia_
+        gvf = (sdam - sdcm) / sdam
         gvf_arr.append(round(gvf, 3))
         if gvf >= GVF_THRESHOLD:
             break
@@ -273,12 +272,9 @@ def classify_raster(
     scaled = scaler.fit_transform(features_raw)
     
     # Apply Spatial Weighting
-    # X and Y are indices 0 and 1. We multiply them by weight.
     scaled[:, 0:2] *= SPATIAL_WEIGHT
 
     # ── K-Means Clustering ──
-    # Since we use spatial coordinates, Jenks (1D only) is no longer suitable.
-    # K-Means works perfectly for this multi-dimensional space.
     kmeans = KMeans(n_clusters=num_classes, n_init=10, random_state=42)
     labels = kmeans.fit_predict(scaled)
     
@@ -296,9 +292,8 @@ def classify_raster(
     classified = median_filter(classified, size=SMOOTHING_KERNEL_SIZE)
 
     # ── Determine Natural Breaks for Legend ──
-    # Even though we used K-Means, users expect Jenks-like legend ranges.
-    # We find the min/max of the resulting clusters.
     class_break_labels = []
+    # K-Means doesn't have "breaks" in 1D space, so we use cluster min/max
     for cls in range(1, num_classes + 1):
         cluster_data = z_vals[ranked_labels == cls]
         if len(cluster_data) > 0:
