@@ -11,6 +11,15 @@ export const useZoneStore = defineStore('zones', () => {
   const config = ref({
     numClasses: 3
   })
+
+  // Metadata set by HomeView after a successful initSession, consumed by DataView
+  const uploadMeta = ref({
+    fileLabel: 'Sample Data',
+    rawFiles: [],
+    initialZ: '',
+    initialCrs: '',
+    isSampleMode: false,
+  })
   
   const results = ref({
     detectedCrs: null,
@@ -121,10 +130,11 @@ export const useZoneStore = defineStore('zones', () => {
     }
     step.value = STEPS.UPLOAD
     error.value = null
+    uploadMeta.value = { fileLabel: 'Sample Data', rawFiles: [], initialZ: '', initialCrs: '', isSampleMode: false }
   }
   
   return {
-    step, loading, error, config, results,
+    step, loading, error, config, results, uploadMeta,
     initSession, generateZones, finalizeZones, exportZones, reset
   }
 })

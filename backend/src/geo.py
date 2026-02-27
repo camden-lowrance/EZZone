@@ -19,7 +19,6 @@ from scipy.spatial import ConvexHull
 from scipy.ndimage import median_filter
 from jenkspy import jenks_breaks as jenks
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
 from osgeo import gdal, osr, ogr
 from rasterio import features
 from rasterio.transform import from_bounds
@@ -36,10 +35,10 @@ GVF_THRESHOLD = 0.95
 SMOOTHING_KERNEL_SIZE = 3
 RESOLUTION_STEP = 0.25
 
-# ── Spatial Clustering ───────────────────────────────────────────────────────
-# Higher weight makes zones more contiguous/compact but less sensitive to yield.
-# Lower weight (e.g. 0.1) stays closer to the yield values.
-SPATIAL_WEIGHT = 0.4 
+# ── Small Zone Elimination ────────────────────────────────────────────────────
+# Polygons smaller than this fraction of total field area are swallowed into
+# their longest-shared-border neighbor.
+MIN_ZONE_AREA_FRACTION = 0.01
 
 # ── Outlier Suppression ───────────────────────────────────────────────────────
 OUTLIER_PERCENTILE_LOW = 2
@@ -169,10 +168,13 @@ def interpolate_raster(
         nan_mask = np.isnan(gridz)
         gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
 
-    mask = features.geometry_mask([poly], out_shape=(ny, nx), 
+    # geometry_mask uses north-up convention (row 0 = ymax), but gridz rows run
+    # south-to-north (row 0 = ymin) due to np.meshgrid with linspace(ymin, ymax).
+    # Flip the mask vertically so it aligns with the array orientation.
+    mask = features.geometry_mask([poly], out_shape=(ny, nx),
                                   transform=from_bounds(xmin, ymin, xmax, ymax, nx, ny),
                                   invert=True)
-    gridz[~mask] = np.nan
+    gridz[~np.flipud(mask)] = np.nan
 
     return gridz, [xmin, ymin, xmax, ymax]
 
@@ -235,26 +237,13 @@ def json_legend(class_breaks: list[str]) -> list[list[str]]:
 def classify_raster(
     array: np.ndarray,
     num_classes: int,
-    bounds: list[float]
 ) -> tuple[np.ndarray, list[str]]:
-    """
-    Classify raster pixels using Spatial-Spectral K-Means clustering.
-    Includes X, Y, and Value in the classification space.
-    """
+    """Classify raster pixels using K-Means on Z values."""
     # ── Pre-Classification Smoothing ──
     array_smoothed = median_filter(array, size=SMOOTHING_KERNEL_SIZE)
     
-    ny, nx = array.shape
-    xmin, ymin, xmax, ymax = bounds
-    
-    xi = np.linspace(xmin, xmax, nx)
-    yi = np.linspace(ymin, ymax, ny)
-    gridx, gridy = np.meshgrid(xi, yi)
-
     valid_mask = ~np.isnan(array_smoothed)
     z_vals = array_smoothed[valid_mask]
-    x_vals = gridx[valid_mask]
-    y_vals = gridy[valid_mask]
 
     if len(z_vals) == 0:
         raise ValueError("No valid values in raster for classification")
@@ -263,24 +252,13 @@ def classify_raster(
     low, high = np.percentile(z_vals, [OUTLIER_PERCENTILE_LOW, OUTLIER_PERCENTILE_HIGH])
     z_clipped = np.clip(z_vals, low, high)
 
-    # ── Feature Vector Preparation ──
-    # [X, Y, Z]
-    features_raw = np.column_stack([x_vals, y_vals, z_clipped])
-    
-    # Scale features to comparable ranges
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(features_raw)
-    
-    # Apply Spatial Weighting
-    scaled[:, 0:2] *= SPATIAL_WEIGHT
-
-    # ── K-Means Clustering ──
+    # ── K-Means Clustering on Z only ──
+    X = z_clipped.reshape(-1, 1)
     kmeans = KMeans(n_clusters=num_classes, n_init=10, random_state=42)
-    labels = kmeans.fit_predict(scaled)
-    
-    # Order labels by mean Yield (Z) so Zone 1 is always lowest yield
-    centers_orig_scale = scaler.inverse_transform(kmeans.cluster_centers_)
-    z_centers = centers_orig_scale[:, 2]
+    labels = kmeans.fit_predict(X)
+
+    # Order labels by mean Z so Zone 1 is always lowest value
+    z_centers = kmeans.cluster_centers_.flatten()
     rank_map = {old_label: new_rank + 1 for new_rank, old_label in enumerate(np.argsort(z_centers))}
     
     ranked_labels = np.array([rank_map[l] for l in labels], dtype=np.int32)
@@ -303,6 +281,36 @@ def classify_raster(
             class_break_labels.append("N/A")
 
     return classified, class_break_labels
+
+
+def _swallow_small_zones(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Reassign small polygons to the neighbor zone with the longest shared border."""
+    total_area = gdf.geometry.area.sum()
+    min_area = total_area * MIN_ZONE_AREA_FRACTION
+
+    # Iterate until no more small polygons remain (handles cascading merges)
+    for _ in range(10):
+        small = gdf[gdf.geometry.area < min_area]
+        if small.empty:
+            break
+        gdf = gdf.copy()
+        for idx in small.index:
+            if idx not in gdf.index:
+                continue
+            poly = gdf.at[idx, 'geometry']
+            # Find all neighbors (touching but different index)
+            neighbors = gdf[(gdf.index != idx) & (gdf.geometry.touches(poly) | gdf.geometry.intersects(poly.buffer(0.1)))]
+            if neighbors.empty:
+                continue
+            # Pick neighbor with longest shared border
+            shared = neighbors.geometry.intersection(poly)
+            best_idx = shared.length.idxmax()
+            gdf.at[idx, 'zone'] = gdf.at[best_idx, 'zone']
+        # Dissolve polygons with the same zone that are now adjacent
+        gdf = gdf.dissolve(by='zone', as_index=False).explode(index_parts=False).reset_index(drop=True)
+        gdf = gdf[gdf.geometry.type == 'Polygon']
+
+    return gdf
 
 
 def polygonize_classes_fast(
@@ -366,6 +374,8 @@ def polygonize_classes_fast(
 
     if gdf_clipped.empty:
         raise ValueError("No valid zone geometries after clipping")
+
+    gdf_clipped = _swallow_small_zones(gdf_clipped)
 
     gdf_wgs84 = gdf_clipped.to_crs(DEFAULT_CRS)
     return gdf_wgs84.sort_values('zone').reset_index(drop=True)

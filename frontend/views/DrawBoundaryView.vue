@@ -1,81 +1,68 @@
 <template>
-  <div class="boundary-view">
+  <div class="max-w-[1200px] mx-auto">
     <div class="card">
-      <div class="flex items-center justify-between mb-md">
+      <div class="flex items-center justify-between mb-4">
         <div>
           <h2>Draw Field Boundary</h2>
           <p class="text-muted">
-            Draw or adjust the boundary for your field. The boundary defines 
+            Draw or adjust the boundary for your field. The boundary defines
             the area where zones will be generated.
           </p>
         </div>
-        <div class="flex gap-sm">
-          <button class="btn btn-secondary" @click="clearDrawing">
-            Clear
-          </button>
-          <button class="btn btn-primary" @click="useDefaultBoundary">
-            Use Default
-          </button>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary" @click="clearDrawing">Clear</button>
+          <button class="btn btn-primary" @click="useDefaultBoundary">Use Default</button>
         </div>
       </div>
-      
+
       <!-- Drawing Tools -->
-      <div class="toolbar mb-md">
-        <button 
+      <div class="flex gap-2 mb-4">
+        <button
           class="tool-btn"
           :class="{ active: drawMode === 'polygon' }"
           @click="drawMode = 'polygon'"
         >
-          <span class="tool-icon">⬡</span>
-          Draw Polygon
+          <span>⬡</span> Draw Polygon
         </button>
-        <button 
+        <button
           class="tool-btn"
           :class="{ active: drawMode === 'modify' }"
           @click="drawMode = 'modify'"
         >
-          <span class="tool-icon">✎</span>
-          Modify
+          <span>✎</span> Modify
         </button>
-        <button 
+        <button
           class="tool-btn"
           :class="{ active: drawMode === 'delete' }"
           @click="drawMode = 'delete'"
         >
-          <span class="tool-icon">✕</span>
-          Delete
+          <span>✕</span> Delete
         </button>
       </div>
-      
+
       <!-- Map -->
       <div ref="mapContainer" class="map-container"></div>
-      
+
       <!-- Info Panel -->
-      <div class="info-panel mt-md">
-        <div class="grid grid-3">
-          <div class="info-item">
-            <span class="info-label">Detected CRS</span>
-            <span class="info-value">{{ store.results.detectedCrs || 'Auto' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Data Points</span>
-            <span class="info-value">{{ store.results.numPoints.toLocaleString() }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Area</span>
-            <span class="info-value">{{ area }}</span>
-          </div>
+      <div class="grid grid-cols-3 gap-4 mt-4 bg-bg-tertiary rounded p-4">
+        <div class="text-center">
+          <span class="meta-label">Detected CRS</span>
+          <span class="info-value">{{ store.results.detectedCrs || 'Auto' }}</span>
+        </div>
+        <div class="text-center">
+          <span class="meta-label">Data Points</span>
+          <span class="info-value">{{ store.results.numPoints.toLocaleString() }}</span>
+        </div>
+        <div class="text-center">
+          <span class="meta-label">Area</span>
+          <span class="info-value">{{ area }}</span>
         </div>
       </div>
-      
+
       <!-- Actions -->
-      <div class="flex justify-between mt-lg">
-        <button class="btn btn-secondary btn-large" @click="goBack">
-          ← Back
-        </button>
-        <button class="btn btn-success btn-large" @click="continueToZones">
-          Generate Zones →
-        </button>
+      <div class="flex justify-between mt-6">
+        <button class="btn btn-secondary btn-large" @click="goBack">← Back</button>
+        <button class="btn btn-success btn-large" @click="continueToZones">Generate Zones →</button>
       </div>
     </div>
   </div>
@@ -122,19 +109,9 @@ function updateArea() {
   areaM2.value = getSphereArea(features[0].getGeometry(), { projection: 'EPSG:3857' })
 }
 
-onMounted(() => {
-  initMap()
-})
-
-onUnmounted(() => {
-  if (map) {
-    map.setTarget(null)
-  }
-})
-
-watch(drawMode, (mode) => {
-  updateInteractions()
-})
+onMounted(() => { initMap() })
+onUnmounted(() => { if (map) map.setTarget(null) })
+watch(drawMode, () => { updateInteractions() })
 
 const boundaryStyle = new Style({
   fill: new Fill({ color: 'rgba(29, 155, 240, 0.2)' }),
@@ -153,11 +130,7 @@ const geojsonFormat = new GeoJSON({
 
 function initMap() {
   boundarySource = new VectorSource()
-
-  boundaryLayer = new VectorLayer({
-    source: boundarySource,
-    style: boundaryStyle
-  })
+  boundaryLayer = new VectorLayer({ source: boundarySource, style: boundaryStyle })
 
   map = new Map({
     target: mapContainer.value,
@@ -170,65 +143,42 @@ function initMap() {
       }),
       boundaryLayer
     ],
-    view: new View({
-      center: [0, 0],
-      zoom: 2
-    })
+    view: new View({ center: [0, 0], zoom: 2 })
   })
 
-  if (store.results.boundary) {
-    loadBoundary(store.results.boundary)
-  }
-
+  if (store.results.boundary) loadBoundary(store.results.boundary)
   updateInteractions()
 }
 
 function removeInteractions() {
-  if (currentInteraction) {
-    map.removeInteraction(currentInteraction)
-    currentInteraction = null
-  }
-  if (snapInteraction) {
-    map.removeInteraction(snapInteraction)
-    snapInteraction = null
-  }
+  if (currentInteraction) { map.removeInteraction(currentInteraction); currentInteraction = null }
+  if (snapInteraction) { map.removeInteraction(snapInteraction); snapInteraction = null }
   map.un('singleclick', handleDeleteClick)
 }
 
 function syncBoundary() {
   const features = boundarySource.getFeatures()
-  if (features.length) {
-    store.results.boundary = geojsonFormat.writeFeatureObject(features[0])
-  }
+  if (features.length) store.results.boundary = geojsonFormat.writeFeatureObject(features[0])
 }
 
 function updateInteractions() {
   removeInteractions()
 
   if (drawMode.value === 'polygon') {
-    currentInteraction = new Draw({
-      source: boundarySource,
-      type: 'Polygon'
-    })
+    currentInteraction = new Draw({ source: boundarySource, type: 'Polygon' })
     map.addInteraction(currentInteraction)
-    currentInteraction.on('drawend', (e) => {
-      // Clear previous boundary before adding new one
+    currentInteraction.on('drawend', () => {
       boundarySource.clear()
       setTimeout(() => { syncBoundary(); updateArea() }, 0)
     })
   } else if (drawMode.value === 'modify') {
-    // Modify lets you drag vertices; Alt+click on a vertex deletes it
-    currentInteraction = new Modify({
-      source: boundarySource
-    })
+    currentInteraction = new Modify({ source: boundarySource })
     map.addInteraction(currentInteraction)
     currentInteraction.on('modifyend', () => { syncBoundary(); updateArea() })
   } else if (drawMode.value === 'delete') {
-    // Click a feature to remove it entirely
     map.on('singleclick', handleDeleteClick)
   }
 
-  // Snap to existing vertices in all modes
   snapInteraction = new Snap({ source: boundarySource })
   map.addInteraction(snapInteraction)
 }
@@ -238,7 +188,7 @@ function handleDeleteClick(e) {
   map.forEachFeatureAtPixel(e.pixel, (feature) => {
     boundarySource.removeFeature(feature)
     store.results.boundary = null
-    return true // stop after first hit
+    return true
   })
 }
 
@@ -246,10 +196,7 @@ function loadBoundary(geojson) {
   boundarySource.clear()
   const feature = geojsonFormat.readFeature(geojson)
   boundarySource.addFeature(feature)
-  
-  // Fit view to boundary
-  const geom = feature.getGeometry()
-  map.getView().fit(geom, { padding: [50, 50, 50, 50] })
+  map.getView().fit(feature.getGeometry(), { padding: [50, 50, 50, 50] })
   updateArea()
 }
 
@@ -260,46 +207,29 @@ function clearDrawing() {
 }
 
 function useDefaultBoundary() {
-  if (store.results.boundary) {
-    loadBoundary(store.results.boundary)
-  }
+  if (store.results.boundary) loadBoundary(store.results.boundary)
 }
 
-function goBack() {
-  store.step = STEPS.UPLOAD
-}
+function goBack() { store.step = STEPS.UPLOAD }
 
 async function continueToZones() {
   if (!store.results.boundary) {
     store.error = 'Please draw a boundary first'
     return
   }
-
   try {
     await store.generateZones()
     store.step = STEPS.ZONES
-  } catch (e) {
-    // Error handled in store
-  }
+  } catch (e) { /* handled in store */ }
 }
 </script>
 
 <style scoped>
-.boundary-view {
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.toolbar {
-  display: flex;
-  gap: var(--space-sm);
-}
-
 .tool-btn {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -319,33 +249,11 @@ async function continueToZones() {
   color: white;
 }
 
-.tool-icon {
-  font-size: 1rem;
-}
-
-.info-panel {
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  padding: var(--space-md);
-}
-
-.info-item {
-  text-align: center;
-}
-
-.info-label {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
 .info-value {
   display: block;
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-primary);
-  margin-top: var(--space-xs);
+  margin-top: 0.25rem;
 }
 </style>

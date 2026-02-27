@@ -106,13 +106,9 @@ def init_session():
                 
     # Case 2: Sample Data
     elif use_sample:
-        test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'blount_harvest_agi.zip')
-        shp_paths, tmpdir_sample = extract_zip_contents(test_file)
-        try:
-            gdf, _ = load_multiple_to_gdf(shp_paths, z_col_req)
-            return _process_gdf_to_res(gdf, z_col_req)
-        finally:
-            import shutil; shutil.rmtree(tmpdir_sample, ignore_errors=True)
+        test_file = os.path.join(current_app.root_path, '..', '..', 'tests', 'fixtures', 'test.csv')
+        gdf, _ = load_multiple_to_gdf([test_file], z_col_req)
+        return _process_gdf_to_res(gdf, z_col_req)
             
     return {'error': 'No valid files found in your upload.', 'code': 'NO_VALID_FILES'}, 400
 

@@ -113,7 +113,13 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
 
     # Ensure point geometries
     if not all(gdf.geometry.type == 'Point'):
-        gdf.geometry = gdf.geometry.centroid
+        original_crs = gdf.crs
+        if original_crs and original_crs.is_geographic:
+            gdf = gdf.to_crs('epsg:3857')
+            gdf.geometry = gdf.geometry.centroid
+            gdf = gdf.to_crs(original_crs)
+        else:
+            gdf.geometry = gdf.geometry.centroid
     
     # ── Point Sampling Optimization ──
     # Sample based on active profile fidelity.
