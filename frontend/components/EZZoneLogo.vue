@@ -7,15 +7,15 @@
     class="ezzone-wordmark"
   >
     <defs>
-      <!-- Horizontal stripe fill for "EZ" (cyan) -->
-      <pattern id="wp-ez" x="0" y="15" width="360" height="11" patternUnits="userSpaceOnUse">
-        <rect width="360" height="7.5" fill="#1adaff" />
-        <rect y="7.5" width="360" height="3.5" fill="#0a0d12" />
+      <!-- Horizontal stripe fill for "EZ" (cyan) — proportions match hero -->
+      <pattern id="wp-ez" x="0" y="0" width="360" height="4" patternUnits="userSpaceOnUse">
+        <rect width="360" height="2.7" fill="#1adaff" />
+        <rect y="2.7" width="360" height="1.3" fill="#0a0d12" />
       </pattern>
-      <!-- Horizontal stripe fill for "Zone" (green) -->
-      <pattern id="wp-zone" x="0" y="15" width="360" height="11" patternUnits="userSpaceOnUse">
-        <rect width="360" height="7.5" fill="#1aff8c" />
-        <rect y="7.5" width="360" height="3.5" fill="#0a0d12" />
+      <!-- Horizontal stripe fill for "Zone" (green) — proportions match hero -->
+      <pattern id="wp-zone" x="0" y="0" width="360" height="4" patternUnits="userSpaceOnUse">
+        <rect width="360" height="2.7" fill="#1aff8c" />
+        <rect y="2.7" width="360" height="1.3" fill="#0a0d12" />
       </pattern>
     </defs>
     <text

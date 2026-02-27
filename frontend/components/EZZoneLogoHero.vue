@@ -13,12 +13,6 @@
     class="ezzone-hero"
   >
     <defs>
-      <!-- Zone Gradient (Strictly Red to Blue, full width) -->
-      <linearGradient id="g-rainbow" gradientUnits="userSpaceOnUse" x1="65" y1="0" x2="935" y2="0">
-        <stop offset="0%"   stop-color="#ff3333" />
-        <stop offset="100%" stop-color="#3366ff" />
-      </linearGradient>
-
       <!-- Field Gradient -->
       <linearGradient id="g-field" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#052c1a" />
@@ -85,37 +79,24 @@
     <rect x="40" y="40" width="920" height="480" rx="80" fill="#0d1117" />
     <rect x="40" y="40" width="920" height="480" rx="80" fill="url(#p-checker)" />
 
-    <!-- ── TOP: Management Zones (Natural Geometric Mesh) ── -->
+    <!-- ── TOP: Management Zones (Filled irregular polygons) ── -->
     <g clip-path="url(#c-top)">
-      <!-- Background Gradient -->
-      <rect x="60" y="60" width="880" height="140" fill="url(#g-rainbow)" />
-      
-      <!-- Distinct Geometric Pattern: Interlocking Staggered Polygons -->
-      <!-- This creates a 'mesh' feel that is orderly but biologically plausible (like cells or plots) -->
-      <g fill="none" stroke="white" stroke-width="2.5" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="square">
-        <!-- Horizontal undulating dividers -->
-        <path d="M60,110 L180,120 L300,100 L450,115 L600,95 L750,110 L940,100" />
-        <path d="M60,155 L180,165 L300,145 L450,160 L600,140 L750,155 L940,145" />
-        
-        <!-- Angled Vertical Dividers (Staggered to prevent a rigid grid look) -->
-        <!-- Row 1 -->
-        <line x1="180" y1="60" x2="180" y2="120" />
-        <line x1="450" y1="60" x2="450" y2="115" />
-        <line x1="750" y1="60" x2="750" y2="110" />
-        
-        <!-- Row 2 -->
-        <line x1="300" y1="100" x2="300" y2="145" />
-        <line x1="600" y1="95" x2="600" y2="140" />
-        <line x1="900" y1="100" x2="900" y2="145" /> <!-- Extra edge detail -->
-        
-        <!-- Row 3 -->
-        <line x1="180" y1="165" x2="180" y2="200" />
-        <line x1="450" y1="160" x2="450" y2="200" />
-        <line x1="750" y1="155" x2="750" y2="200" />
+      <!-- Zone 1: Red (left column) -->
+      <path d="M 65,65 L 308,65 Q 342,100 335,132 Q 318,165 308,200 L 65,200 Z" fill="#cc2200" />
+      <!-- Zone 2: Orange (upper center) -->
+      <path d="M 308,65 L 665,65 Q 650,95 642,132 Q 575,115 500,117 Q 420,118 335,132 Q 342,100 308,65 Z" fill="#e87d00" />
+      <!-- Zone 3: Blue (right column) -->
+      <path d="M 665,65 L 935,65 L 935,200 L 662,200 Q 640,165 642,132 Q 650,95 665,65 Z" fill="#0055cc" />
+      <!-- Zone 4: Green (lower center) -->
+      <path d="M 335,132 Q 420,118 500,117 Q 575,115 642,132 Q 640,165 662,200 L 308,200 Q 318,165 335,132 Z" fill="#228844" />
+      <!-- Zone borders -->
+      <g fill="none" stroke="white" stroke-width="2.5" stroke-opacity="0.85">
+        <path d="M 308,65 Q 342,100 335,132 Q 318,165 308,200" />
+        <path d="M 665,65 Q 650,95 642,132 Q 640,165 662,200" />
+        <path d="M 335,132 Q 420,118 500,117 Q 575,115 642,132" />
       </g>
-      
-      <!-- Shadow Bleed overlay (Fade to text) -->
-      <rect x="60" y="60" width="880" height="140" fill="url(#g-shadow-down)" />
+      <!-- Shadow bleed (fade into text area) -->
+      <rect x="65" y="65" width="870" height="135" fill="url(#g-shadow-down)" />
     </g>
 
     <!-- ── MIDDLE: EZZone Wordmark ── -->
