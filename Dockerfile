@@ -39,6 +39,7 @@ COPY --from=frontend-builder /app/dist ./dist
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_ENV=production
 ENV PORT=8080
+ENV MKL_THREADING_LAYER=GNU
 
 # Expose port (Railway uses PORT env var)
 EXPOSE $PORT

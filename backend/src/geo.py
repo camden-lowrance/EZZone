@@ -18,7 +18,7 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 from scipy.spatial import ConvexHull
 from scipy.ndimage import median_filter
 from jenkspy import jenks_breaks as jenks
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 from osgeo import gdal, osr, ogr
 from rasterio import features
 from rasterio.transform import from_bounds
@@ -57,7 +57,7 @@ PROFILES = {
         'max_points': 10000,
         'target_pixels': 1500,
         'min_res': 0.5,
-        'gvf_samples': 50000,
+        'gvf_samples': 10000,
     }
 }
 
@@ -204,13 +204,22 @@ def gvf_array(stats: np.ndarray, max_class: int) -> list[float]:
         return [0.0]
 
     X = sampled.reshape(-1, 1)
-    
+
     gvf_arr = []
-    for k in range(2, min(max_class, len(np.unique(sampled))) + 1):
-        kmeans = KMeans(n_clusters=k, n_init=1, random_state=42)
-        kmeans.fit(X)
-        sdcm = kmeans.inertia_
-        gvf = (sdam - sdcm) / sdam
+    prev_centers = None
+    k_max = min(max_class, len(np.unique(sampled)))
+    for k in range(2, k_max + 1):
+        # Warm-start: reuse previous centroids + one new random point
+        if prev_centers is not None:
+            new_pt = X[np.random.randint(len(X))].reshape(1, 1)
+            init = np.vstack([prev_centers, new_pt])
+        else:
+            init = "k-means++"
+        mb = MiniBatchKMeans(n_clusters=k, init=init, n_init=1,
+                             batch_size=min(1024, len(X)), random_state=42)
+        mb.fit(X)
+        prev_centers = mb.cluster_centers_
+        gvf = (sdam - mb.inertia_) / sdam
         gvf_arr.append(round(gvf, 3))
         if gvf >= GVF_THRESHOLD:
             break

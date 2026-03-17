@@ -4,9 +4,9 @@
       <div class="inline-flex">
         <EZZoneLogoHero />
       </div>
-      <p class="text-text-secondary text-[1.1rem] tracking-[0.04em] uppercase">
+      <h1 class="text-[2rem] font-bold tracking-[0.06em] uppercase bg-gradient-to-r from-emerald-400 via-green-300 to-teal-400 bg-clip-text text-transparent drop-shadow-lg">
         Agricultural Management Zone Generator
-      </p>
+      </h1>
     </div>
 
     <div class="grid grid-cols-2 gap-4">
