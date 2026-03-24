@@ -36,9 +36,10 @@ def _process_gdf_to_res(gdf, z_col_req):
 
     in_projection = f"epsg:{gdf.crs.to_epsg()}" if (gdf.crs and gdf.crs.to_epsg()) else (gdf.crs.to_string() if gdf.crs else 'epsg:4326')
     x, y, z = gdf.geometry.x.values, gdf.geometry.y.values, gdf[z_col].values
-    all_cols = gdf.columns.tolist()
-    if 'geometry' in all_cols: all_cols.remove('geometry')
-    numeric_cols = gdf.select_dtypes(include=[np.number]).columns.tolist()
+    geom_col = gdf.geometry.name
+    all_cols = [c for c in gdf.columns.tolist() if c != geom_col]
+    all_cols = list(dict.fromkeys(all_cols))
+    numeric_cols = [c for c in gdf.select_dtypes(include=[np.number]).columns.tolist() if c != geom_col]
     preview_data = gdf[all_cols].head(5).to_dict(orient='records')
 
     data_id = str(uuid.uuid4())

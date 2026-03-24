@@ -143,6 +143,7 @@ def interpolate_raster(
     profile = get_active_profile()
     target_pixels = profile['target_pixels']
     min_res = profile['min_res']
+    max_points = profile['max_points']
 
     points = reproject_array(x, y, inp, outp)
     xmin, ymin, xmax, ymax = poly.bounds
@@ -160,11 +161,19 @@ def interpolate_raster(
     yi = np.linspace(ymin, ymax, ny)
     gridx, gridy = np.meshgrid(xi, yi)
     
-    lin_interp = LinearNDInterpolator(points, z)
+    if len(points) > max_points:
+        idx = np.random.choice(len(points), max_points, replace=False)
+        points_sub = points[idx]
+        z_sub = z[idx]
+    else:
+        points_sub = points
+        z_sub = z
+    
+    lin_interp = LinearNDInterpolator(points_sub, z_sub)
     gridz = lin_interp(gridx, gridy)
     
     if np.isnan(gridz).any():
-        near_interp = NearestNDInterpolator(points, z)
+        near_interp = NearestNDInterpolator(points_sub, z_sub)
         nan_mask = np.isnan(gridz)
         gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
 

@@ -138,6 +138,7 @@ def export_zones(
         return json.dumps(zones_geojson)
     elif format == 'shapefile':
         gdf = gpd.GeoDataFrame.from_features(zones_geojson['features'], crs='epsg:4326')
+        gdf.columns = [c[:10] if len(c) > 10 else c for c in gdf.columns]
         with tempfile.TemporaryDirectory() as tmpdir:
             outpath = f"{tmpdir}/zones.shp"
             gdf.to_file(outpath)
