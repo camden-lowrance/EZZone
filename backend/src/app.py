@@ -68,6 +68,10 @@ def create_app(test_config=None) -> Flask:
     @app.route('/')
     def index():
         return send_from_directory(app.static_folder, 'index.html')
+
+    @app.route('/debug-sentry')
+    def debug_sentry():
+        raise RuntimeError('Sentry test from EZZone')
     
     @app.route('/<path:path>')
     def serve_static(path):
