@@ -1,100 +1,126 @@
 # Agent Development Guide
 
-Guidelines for AI agents working on the ezzone-pyanywhere project.
+Guidelines for AI agents working in the EZZone repository.
 
 ## Project Overview
 
-**ezzone-pyanywhere** is an agricultural management zone generation web application. Users upload point-sampled field data (soil EC, yield, NDVI, etc.), draw a field boundary, classify into management zones, and export.
+EZZone is an agricultural management zone generator. Users upload point-sampled field data, review the detected CRS and value column, refine a field boundary, generate management zones, and export the result.
 
-- **Frontend:** Vue 3 + Vite, OpenLayers (maps), Chart.js, Pinia (state)
-- **Backend:** Python Flask API
-- **Geospatial:** GDAL, rasterio, shapely, geopandas, scipy
-- **Environment:** Pixi (conda-forge)
+- Frontend: Vue 3 + Vite + Pinia + OpenLayers + Chart.js
+- Backend: Flask API
+- Geospatial stack: GDAL, GeoPandas, rasterio, shapely, pyproj, scipy
+- Environment: Pixi on conda-forge
 
 ## Commands
 
 ```bash
-pixi install                               # Install all dependencies
-pixi run dev                               # Frontend + backend dev servers
-pixi run dev-be                            # Backend only (Flask --reload --debug)
-pixi run dev-fe                            # Frontend only (Vite)
-pixi run start                             # Build frontend, then serve via Flask
-pixi run build                             # Build frontend only
-pixi run test                              # pytest tests/
-pixi run test-cov                          # pytest with HTML coverage
-pytest tests/test_mz_api.py                # Single test file
-pytest tests/test_mz_api.py::test_name     # Single test
-pixi add package_name                      # Add Python dependency
-npm install package-name                   # Add JS dependency
+pixi install
+pixi run dev
+pixi run dev-be
+pixi run dev-fe
+pixi run build
+pixi run start
+pixi run test
+pixi run test-cov
+pytest tests/test_integration.py
+pytest tests/test_mz_api.py
+pytest tests/test_mz_api.py::test_generate_zones_basic
 ```
 
 ## Project Structure
 
-```
+```text
 backend/src/
-├── app.py          # Flask factory (create_app), serves Vue SPA from dist/
-├── api.py          # REST endpoints, diskcache session storage (24hr, UUID-keyed)
-├── geo.py          # Core geospatial: boundaries, reprojection, interpolation, classification, polygonization
-├── zones.py        # Zone generation orchestrator + GVF computation
-└── io_service.py   # Multi-format file loading (CSV, Excel, Shapefile, GeoJSON, KML)
+|-- app.py          # Flask app factory + SPA serving
+|-- api.py          # API endpoints, DiskCache-backed upload state, exports
+|-- geo.py          # CRS helpers, interpolation, GVF, classification, polygonization
+|-- zones.py        # Zone generation orchestration and export helpers
+`-- io_service.py   # File loading, CRS detection, schema checks
 
 frontend/
-├── App.vue                    # Root component: 4-step wizard container
-├── main.js                    # Vue entry point (Pinia setup)
-├── style.css                  # Global dark theme
-├── stores/zoneStore.js        # Pinia store: UI state + API calls
-└── views/
-    ├── HomeView.vue           # Step 1: File upload + Z-column config
-    ├── DrawBoundaryView.vue   # Step 2: OpenLayers boundary editing
-    ├── ZonesView.vue          # Step 3: GVF chart + zone preview
-    └── FinalizeView.vue       # Step 4: Export (GeoJSON/Shapefile)
+|-- App.vue
+|-- main.js
+|-- style.css
+|-- steps.js
+|-- stores/zoneStore.js
+`-- views/
+    |-- HomeView.vue
+    |-- DataView.vue
+    |-- DrawBoundaryView.vue
+    |-- ZonesView.vue
+    `-- FinalizeView.vue
 
 tests/
-├── test_mz_api.py             # Core algorithm unit tests
-├── test_integration.py        # Flask end-to-end tests
-└── fixtures/test.csv          # Sample dataset
+|-- test_integration.py
+|-- test_mz_api.py
+`-- fixtures/test.csv
 ```
 
 ## Architecture
 
-### API Endpoints
+### Frontend flow
 
-- `POST /api/session/init` — Upload file → load to GeoDataFrame → auto-detect CRS/Z-column → compute boundary → cache
-- `POST /api/zones/generate` — Generate zones from cached data with custom boundary + num_classes
-- `POST /api/export` — Export cached zones as GeoJSON or Shapefile (.zip)
-- `GET /api/health` — Health check
+The UI is a 5-step SPA with store-driven navigation:
 
-### Processing Pipeline
+1. `HomeView.vue` - upload files or use sample data
+2. `DataView.vue` - review detected CRS, preview rows, and choose the value column
+3. `DrawBoundaryView.vue` - edit the working boundary on an OpenLayers map
+4. `ZonesView.vue` - inspect generated zones, GVF, and class breaks
+5. `FinalizeView.vue` - export outputs and review the summary
 
+There is no Vue Router. `frontend/stores/zoneStore.js` owns the active step, current `data_id`, and API-backed results.
+
+### Backend flow
+
+- `POST /api/session/init`
+  - Loads uploaded files or sample data
+  - Detects CRS and candidate value columns
+  - Returns `data_id`, preview metadata, and a default convex-hull boundary
+- `POST /api/zones/generate`
+  - Looks up cached raw data by `data_id`
+  - Re-runs zone generation for the submitted boundary and class count
+- `POST /api/export`
+  - Returns cached zone output as GeoJSON or zipped Shapefile
+- `GET /api/health`
+  - Health check for local dev and deployment
+
+### State model
+
+- Frontend state is local to the browser and keyed by the returned `data_id`
+- Backend requests are effectively stateless from Flask's perspective
+- Raw upload data is cached in DiskCache for 24 hours
+- Generated zones are cached for 1 hour
+- Uploaded files are written to a per-request temporary directory before loading, which avoids same-filename collisions across users
+
+## Processing Pipeline
+
+```text
+Upload/sample data
+  -> load_to_gdf() / load_multiple_to_gdf()
+  -> detect CRS + value column
+  -> derive default convex-hull boundary
+  -> reproject into UTM
+  -> interpolate an adaptive-resolution raster
+  -> compute GVF with MiniBatchKMeans
+  -> classify raster values with KMeans
+  -> polygonize and clip classes
+  -> reproject to EPSG:4326
+  -> export GeoJSON or zipped Shapefile
 ```
-Upload → load_to_gdf (auto-detect CRS/columns)
-  → convex hull boundary → user edits boundary
-  → reproject to UTM → interpolate to 5m raster (scipy)
-  → classify (Natural Breaks / jenkspy) → polygonize (GDAL)
-  → reproject to EPSG:4326 → serve as GeoJSON FeatureCollection
-```
-
-### Frontend
-
-4-step wizard SPA. No Vue Router — step state managed in Pinia store (`zoneStore.js`). Vite proxies `/api` to `localhost:5000` in dev.
-
-### State Management
-
-- **Frontend:** Pinia store holds step, loading, error, dataId, config, results
-- **Backend:** Stateless endpoints; diskcache stores session data keyed by UUID (24hr expiry)
 
 ## Key Constraints
 
-- **GDAL is required** — no fallbacks. Pinned to 3.12.2 in pixi.toml.
-- Fixed **5m raster resolution** for performance (target <1s polygonization).
-- All spatial output is **EPSG:4326 GeoJSON**; internal processing uses UTM.
-- Use `polygonize_classes_fast()` — not GDAL's built-in polygonize.
-- Frontend uses **Vue 3 Composition API** and dark theme CSS variables.
-- `conftest.py` adds `backend/` to `sys.path` so tests can `import src`.
+- GDAL is required. Do not add "lightweight fallback" code paths.
+- API responses should stay EPSG:4326 GeoJSON.
+- Internal processing should happen in projected CRS.
+- Prefer in-memory processing over long-lived intermediate files.
+- `SENTRY_DSN` is optional and should remain optional; local dev and tests must still run cleanly without it.
+- Keep frontend changes aligned with the existing Pinia-driven wizard flow.
+- Tests rely on `conftest.py` adding `backend/` to `sys.path`, so imports use `from src...`.
 
 ## Code Style
 
-- Python: PEP 8, type hints on function signatures, GDAL imported directly
-- JavaScript: Vue 3 Composition API, component-based architecture
-- Prefer in-memory processing over file I/O
-- Use vectorized numpy operations for performance
+- Python: PEP 8, type hints on public function signatures, user-facing errors should prefer `DataError`
+- JavaScript: Vue 3 Composition API, component-oriented structure
+- Geospatial logic: prefer vectorized numpy / geopandas operations over Python loops when possible
+- Docs: keep README and this file aligned with the actual code path, not stale architecture notes

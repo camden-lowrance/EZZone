@@ -1,8 +1,9 @@
 """
-Integration tests for the ezzone Flask application.
+Integration tests for the EZZone Flask application.
 
-Each test uses Flask's test client, which preserves the session cookie across
-requests within the same `with client:` block, exactly as a browser would.
+The frontend now drives the backend with a returned `data_id` rather than
+Flask session cookies, so these tests exercise the stateless request flow the
+browser uses in production.
 """
 
 import io
@@ -23,7 +24,7 @@ from src.geo import bound_json
 _LONS = np.linspace(-0.460, -0.450, 10)
 _LATS = np.linspace(52.070, 52.080, 10)
 _LON_GRID, _LAT_GRID = np.meshgrid(_LONS, _LATS)
-# Simple linear gradient so Jenks classification always finds clear breaks.
+# Simple linear gradient so classification consistently produces clear zones.
 _Z_GRID = (_LON_GRID + 0.455) * 400 + (_LAT_GRID - 52.075) * 600 + 6.0
 
 FIXTURE_X = _LON_GRID.flatten()
@@ -59,7 +60,7 @@ def app(tmp_path):
 
 @pytest.fixture()
 def client(app):
-    """Test client with cookie jar preserved across requests."""
+    """Test client for the stateless API flow."""
     with app.test_client() as c:
         yield c
 
@@ -145,6 +146,46 @@ def test_session_init_with_file(client, fixture_csv):
     assert 'numeric_columns' in body
     assert 'preview_data' in body
     assert len(body['preview_data']) > 0
+
+
+def test_session_init_isolates_same_named_uploads(app, fixture_csv, monkeypatch):
+    """Uploads with the same filename should be isolated per request."""
+    from src import api as api_module
+
+    original_loader = api_module.load_multiple_to_gdf
+    captured_paths = []
+
+    def tracking_loader(filepaths, z_col_req=None, crs_override=None):
+        captured_paths.append(list(filepaths))
+        return original_loader(filepaths, z_col_req, crs_override)
+
+    monkeypatch.setattr(api_module, 'load_multiple_to_gdf', tracking_loader)
+
+    with app.test_client() as client_a, app.test_client() as client_b:
+        with open(fixture_csv, 'rb') as first_file:
+            first = client_a.post(
+                '/api/session/init',
+                data={'file': (first_file, 'field.csv')},
+                content_type='multipart/form-data',
+            )
+        with open(fixture_csv, 'rb') as second_file:
+            second = client_b.post(
+                '/api/session/init',
+                data={'file': (second_file, 'field.csv')},
+                content_type='multipart/form-data',
+            )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.get_json()['data_id'] != second.get_json()['data_id']
+    assert len(captured_paths) == 2
+
+    first_path = captured_paths[0][0]
+    second_path = captured_paths[1][0]
+
+    assert os.path.basename(first_path) == 'field.csv'
+    assert os.path.basename(second_path) == 'field.csv'
+    assert os.path.dirname(first_path) != os.path.dirname(second_path)
 
 
 # ── Full pipeline ─────────────────────────────────────────────────────────────

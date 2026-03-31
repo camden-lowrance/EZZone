@@ -5,13 +5,15 @@ Truly stateless Universal Vector API.
 from __future__ import annotations
 import json
 import os
+import shutil
+import tempfile
 import uuid
 import numpy as np
 from flask import Blueprint, request, Response, current_app
 from werkzeug.utils import secure_filename
 from diskcache import Cache
 from .zones import generate_zones, export_zones, get_metadata
-from .io_service import load_to_gdf, load_multiple_to_gdf, extract_zip_contents, DataError
+from .io_service import load_multiple_to_gdf, extract_zip_contents, DataError
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -65,7 +67,7 @@ def _process_gdf_to_res(gdf, z_col_req):
 
 @api_bp.route('/session/init', methods=['POST'])
 def init_session():
-    """Initialize session with any supported file."""
+    """Initialize per-upload cached data from any supported file."""
     z_col_req = request.form.get('z_column')
     crs_override = request.form.get('crs') or None
     files = request.files.getlist('file')
@@ -74,12 +76,13 @@ def init_session():
     # Case 1: New Upload
     if files and files[0].filename:
         upload_folder = current_app.config['UPLOAD_FOLDER']
+        request_upload_dir = tempfile.mkdtemp(prefix='upload_', dir=upload_folder)
         saved_paths = []
         tmpdirs = []
         try:
-            for f in files:
-                filename = secure_filename(f.filename)
-                filepath = os.path.join(upload_folder, filename)
+            for index, f in enumerate(files, start=1):
+                filename = secure_filename(f.filename) or f'upload-{index}'
+                filepath = os.path.join(request_upload_dir, filename)
                 f.save(filepath)
                 saved_paths.append(filepath)
             
@@ -99,10 +102,7 @@ def init_session():
         except Exception as e:
             return {'error': f'Unexpected error processing file: {e}', 'code': 'SERVER_ERROR'}, 500
         finally:
-            if not current_app.config.get('TESTING'):
-                for p in saved_paths:
-                    if os.path.exists(p): os.remove(p)
-            import shutil
+            shutil.rmtree(request_upload_dir, ignore_errors=True)
             for td in tmpdirs:
                 shutil.rmtree(td, ignore_errors=True)
                 

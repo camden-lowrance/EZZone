@@ -1,6 +1,4 @@
-"""
-Stateless Flask application factory for ezzone.
-"""
+"""Stateless Flask application factory for EZZone."""
 
 import os
 from flask import Flask, send_from_directory
@@ -8,6 +6,16 @@ from flask import Flask, send_from_directory
 
 def create_app(test_config=None) -> Flask:
     """Create and configure the Flask application."""
+    sentry_dsn = os.environ.get('SENTRY_DSN')
+    if sentry_dsn and not (test_config or {}).get('TESTING'):
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            integrations=[FlaskIntegration()],
+        )
+
     # Calculate paths relative to this file
     src_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(src_dir))
@@ -23,7 +31,6 @@ def create_app(test_config=None) -> Flask:
         SECRET_KEY=os.environ.get('FLASK_SECRET_KEY', 'dev'),
         UPLOAD_FOLDER=os.path.join(app.root_path, 'static/uploads'),
         CACHE_FOLDER=os.path.join(app.instance_path, 'cache'),
-        ALLOWED_EXTENSIONS={'txt', 'csv'},
     )
 
     if test_config: app.config.update(test_config)

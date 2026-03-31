@@ -5,12 +5,10 @@ IO Service for handling various data formats and converting them to GeoDataFrame
 from __future__ import annotations
 import os
 import tempfile
-import shutil
 import zipfile
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point
 from .geo import get_active_profile
 
 
@@ -147,9 +145,6 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
 
     return gdf, str(z_col)
 
-
-# Extensions that load_to_gdf can handle directly
-_VECTOR_EXTS = {'.shp', '.geojson', '.json', '.gpkg', '.kml', '.gml', '.csv', '.txt', '.xlsx', '.xls'}
 # Sidecar extensions that belong to shapefiles — skip these as standalone files
 _SHAPEFILE_SIDECARS = {'.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx', '.fbn', '.fbx', '.ain', '.aih', '.atx', '.ixs', '.mxs', '.qix'}
 
@@ -216,6 +211,9 @@ def load_multiple_to_gdf(filepaths: list[str], z_col_req: str | None = None, crs
         z_col = _detect_z_col(combined, exclude=exclude_cols)
 
     if not z_col or combined[z_col].isna().all():
-        raise ValueError(f'No valid numeric data found in column "{z_col_req or z_col}"')
+        raise DataError(
+            f'No valid numeric data found in column "{z_col_req or z_col}". Check that the column exists and contains numbers.',
+            'MISSING_Z_COL'
+        )
 
     return combined, str(z_col)
