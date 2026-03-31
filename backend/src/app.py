@@ -2,6 +2,7 @@
 
 import os
 from flask import Flask, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 
 def create_app(test_config=None) -> Flask:
@@ -62,6 +63,16 @@ def create_app(test_config=None) -> Flask:
 
     @app.errorhandler(500)
     def internal_error(e):
+        original = getattr(e, 'original_exception', None)
+        exc = original or e
+        if not isinstance(exc, HTTPException):
+            try:
+                import sentry_sdk
+
+                sentry_sdk.capture_exception(exc)
+                sentry_sdk.flush(timeout=2.0)
+            except Exception:
+                pass
         return {'error': 'An unexpected server error occurred.', 'code': 'SERVER_ERROR'}, 500
 
     # Serve static files for Vue SPA
