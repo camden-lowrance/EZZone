@@ -1,5 +1,7 @@
 # EZZone
 
+**Live demo:** https://ezzone-production.up.railway.app
+
 EZZone is a Flask + Vue 3 web application for generating agricultural management zones from point-sampled field data such as yield, EC, and NDVI. Users upload one or more supported files, review the detected CRS and value column, adjust a field boundary, generate classified zones, and export the result as GeoJSON or Shapefile.
 
 ## Current Flow
@@ -124,11 +126,6 @@ Upload/sample data
 - Railway health check: `/api/health`
 - Optional app-level error tracking: set `SENTRY_DSN` to enable Flask exception reporting via `sentry-sdk`
 
-## Railway Notifications
+## License
 
-There are two easy paths:
-
-- Railway-native monitoring for service health, logs, and metrics
-- Sentry for actual Flask exception notifications
-
-For EZZone specifically, `SENTRY_DSN` is the quickest route to "tell me when the app throws" because it captures unhandled backend exceptions without requiring a custom polling service.
+MIT. See [LICENSE](LICENSE).

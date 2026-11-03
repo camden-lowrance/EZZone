@@ -14,3 +14,5 @@ build/
 .idea/
 .aider*
 backend/instance/
+instance/
+.claude/settings.local.json
