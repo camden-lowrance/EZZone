@@ -56,6 +56,12 @@
         </div>
       </div>
 
+      <div v-if="store.results.originalNumPoints > store.results.pointsUsed" class="alert alert-info mt-6" role="status">
+        <strong>Using a sample of your data</strong><br />
+        {{ store.results.originalNumPoints.toLocaleString() }} points were read.
+        For performance, {{ store.results.pointsUsed.toLocaleString() }} points are randomly sampled for generating zones.
+      </div>
+
       <!-- Data Preview Table -->
       <div v-if="store.results.previewData.length" class="mt-6">
         <label class="summary-label">Data Preview</label>

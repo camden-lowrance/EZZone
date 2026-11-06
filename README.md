@@ -86,6 +86,7 @@ pytest tests/test_mz_api.py::test_generate_zones_basic
   - Accepts uploaded files or `use_sample=1`
   - Detects coordinate columns, CRS, and candidate value columns
   - Returns `data_id`, preview rows, detected metadata, and a default boundary
+  - Returns `original_num_points` before sampling, `num_points` retained after import, and `points_used` for interpolation
 - `POST /api/zones/generate`
   - Accepts `data_id`, `boundary_geojson`, and `num_classes`
   - Returns zone GeoJSON, GVF values, class breaks, and legend colors
@@ -116,6 +117,7 @@ Upload/sample data
 - Frontend state lives in Pinia and tracks the active step plus the current `data_id`.
 - The SPA does not use Vue Router; step transitions are store-driven.
 - Internal geoprocessing happens in projected CRS, while API responses are EPSG:4326 GeoJSON.
+- Boundaries exchanged with the map are EPSG:4326 even when uploaded point data uses another CRS.
 - Runtime quality/performance is controlled by `EZZONE_PROFILE` in `backend/src/geo.py`.
 - Production container builds the Vite frontend first, then serves it through Flask.
 
@@ -123,6 +125,7 @@ Upload/sample data
 
 - Local production-style run: `pixi run start`
 - Linux container entrypoint: `pixi run start-prod`
+- Production uses one Gunicorn worker with two request threads and a 120-second worker timeout. The container defaults numerical libraries to one CPU thread each to limit contention; Railway environment variables can override the container defaults. Two processing requests can use more memory than one, so monitor memory and response times under load.
 - Railway health check: `/api/health`
 - Optional app-level error tracking: set `SENTRY_DSN` to enable Flask exception reporting via `sentry-sdk`
 

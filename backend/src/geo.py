@@ -13,7 +13,7 @@ import pyproj
 import geopandas as gpd
 import matplotlib as mpl
 import matplotlib.colors as mcolors
-from shapely.geometry import Polygon, shape
+from shapely.geometry import MultiPolygon, Polygon, shape
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 from scipy.spatial import ConvexHull
 from scipy.ndimage import median_filter
@@ -91,7 +91,7 @@ def reproject_poly(
     obj: Any,
     in_projection: str = WEB_MERCATOR_CRS,
     out_projection: str = DEFAULT_CRS
-) -> Polygon:
+) -> Polygon | MultiPolygon:
     """Reproject a polygon from one CRS to another."""
     if isinstance(obj, dict):
         if 'coordinates' in obj and 'type' in obj:
@@ -119,16 +119,25 @@ def reproject_array(x: np.ndarray, y: np.ndarray, inp: str, outp: str) -> np.nda
     return np.column_stack([xs, ys])
 
 
-def utmzone(xy: tuple | Polygon) -> pyproj.CRS:
+def utmzone(xy: tuple | Polygon | MultiPolygon) -> pyproj.CRS:
     """Get the UTM CRS for the given coordinates."""
-    if isinstance(xy, Polygon):
+    from .io_service import DataError
+
+    if isinstance(xy, (Polygon, MultiPolygon)):
         gdf = gpd.GeoDataFrame(geometry=[xy], crs=DEFAULT_CRS)
     else:
         gdf = gpd.GeoDataFrame(
             geometry=gpd.points_from_xy([xy[0]], [xy[1]]),
             crs=DEFAULT_CRS,
         )
-    return gdf.estimate_utm_crs()
+    try:
+        return gdf.estimate_utm_crs()
+    except RuntimeError as exc:
+        raise DataError(
+            'Could not determine a UTM coordinate system for this boundary. '
+            'Check the input CRS and redraw the boundary in the correct location.',
+            'INVALID_BOUNDARY_CRS',
+        ) from exc
 
 
 def interpolate_raster(
@@ -159,7 +168,6 @@ def interpolate_raster(
 
     xi = np.linspace(xmin, xmax, nx)
     yi = np.linspace(ymin, ymax, ny)
-    gridx, gridy = np.meshgrid(xi, yi)
     
     if len(points) > max_points:
         idx = np.random.choice(len(points), max_points, replace=False)
@@ -170,12 +178,13 @@ def interpolate_raster(
         z_sub = z
     
     lin_interp = LinearNDInterpolator(points_sub, z_sub)
-    gridz = lin_interp(gridx, gridy)
+    gridz = lin_interp(xi[None, :], yi[:, None])
     
     if np.isnan(gridz).any():
         near_interp = NearestNDInterpolator(points_sub, z_sub)
         nan_mask = np.isnan(gridz)
-        gridz[nan_mask] = near_interp(gridx[nan_mask], gridy[nan_mask])
+        rows, cols = np.nonzero(nan_mask)
+        gridz[nan_mask] = near_interp(xi[cols], yi[rows])
 
     # geometry_mask uses north-up convention (row 0 = ymax), but gridz rows run
     # south-to-north (row 0 = ymin) due to np.meshgrid with linspace(ymin, ymax).
@@ -262,6 +271,7 @@ def classify_raster(
     
     valid_mask = ~np.isnan(array_smoothed)
     z_vals = array_smoothed[valid_mask]
+    del array_smoothed
 
     if len(z_vals) == 0:
         raise ValueError("No valid values in raster for classification")
@@ -277,12 +287,14 @@ def classify_raster(
 
     # Order labels by mean Z so Zone 1 is always lowest value
     z_centers = kmeans.cluster_centers_.flatten()
-    rank_map = {old_label: new_rank + 1 for new_rank, old_label in enumerate(np.argsort(z_centers))}
-    
-    ranked_labels = np.array([rank_map[l] for l in labels], dtype=np.int32)
+    rank_map = np.empty(len(z_centers), dtype=np.int32)
+    rank_map[np.argsort(z_centers)] = np.arange(1, len(z_centers) + 1, dtype=np.int32)
+    ranked_labels = rank_map[labels]
+    del kmeans, labels, X, z_clipped
 
     classified = np.zeros(array.shape, dtype=np.int32)
     classified.flat[valid_mask.ravel()] = ranked_labels
+    del valid_mask
     
     # ── Final Smoothing ──
     classified = median_filter(classified, size=SMOOTHING_KERNEL_SIZE)

@@ -54,4 +54,4 @@ clean = "rmdir /s /q dist"
 gunicorn = ">=23.0.0,<24"
 
 [target.linux-64.tasks]
-start-prod = "gunicorn --bind 0.0.0.0:$PORT 'src.app:create_app()' --chdir backend"
+start-prod = "gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 'src.app:create_app()' --chdir backend"

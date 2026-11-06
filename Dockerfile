@@ -30,7 +30,7 @@ RUN pixi install --locked
 
 # Copy application code
 COPY backend/ ./backend/
-COPY tests/fixtures/ ./tests/fixtures/
+COPY tests/fixtures/test.csv ./tests/fixtures/test.csv
 
 # Copy built frontend from previous stage
 COPY --from=frontend-builder /app/dist ./dist
@@ -40,6 +40,11 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_ENV=production
 ENV PORT=8080
 ENV MKL_THREADING_LAYER=GNU
+# Limit native numerical thread pools so concurrent requests do not each
+# try to consume all available CPUs on a small instance.
+ENV OMP_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
 
 # Expose port (Railway uses PORT env var)
 EXPOSE $PORT

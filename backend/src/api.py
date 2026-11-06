@@ -12,6 +12,7 @@ import numpy as np
 from flask import Blueprint, request, Response, current_app
 from werkzeug.utils import secure_filename
 from diskcache import Cache
+from .geo import get_active_profile
 from .zones import generate_zones, export_zones, get_metadata
 from .io_service import load_multiple_to_gdf, extract_zip_contents, DataError
 
@@ -57,6 +58,8 @@ def _process_gdf_to_res(gdf, z_col_req):
         'data_id': data_id,
         'boundary': meta['boundary'],
         'num_points': meta['num_points'],
+        'original_num_points': gdf.attrs.get('original_num_points', meta['num_points']),
+        'points_used': min(meta['num_points'], get_active_profile()['max_points']),
         'detected_crs': in_projection,
         'is_crs_guessed': gdf.attrs.get('is_crs_guessed', False),
         'detected_z': z_col,

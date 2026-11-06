@@ -33,7 +33,9 @@ export const useZoneStore = defineStore('zones', () => {
     gvf: [],
     classBreaks: [],
     legend: null,
-    numPoints: 0
+    numPoints: 0,
+    originalNumPoints: 0,
+    pointsUsed: 0
   })
 
   async function initSession(files, zColumn = '', crs = '', useSample = false) {
@@ -57,6 +59,8 @@ export const useZoneStore = defineStore('zones', () => {
       dataId.value = data.data_id
       results.value.boundary = data.boundary
       results.value.numPoints = data.num_points
+      results.value.originalNumPoints = data.original_num_points ?? data.num_points
+      results.value.pointsUsed = data.points_used ?? data.num_points
       results.value.detectedCrs = data.detected_crs
       results.value.isCrsGuessed = data.is_crs_guessed || false
       results.value.detectedZ = data.detected_z
@@ -129,7 +133,9 @@ export const useZoneStore = defineStore('zones', () => {
       gvf: [],
       classBreaks: [],
       legend: null,
-      numPoints: 0
+      numPoints: 0,
+      originalNumPoints: 0,
+      pointsUsed: 0
     }
     step.value = STEPS.UPLOAD
     error.value = null

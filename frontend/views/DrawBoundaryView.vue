@@ -50,8 +50,11 @@
           <span class="info-value">{{ store.results.detectedCrs || 'Auto' }}</span>
         </div>
         <div class="text-center">
-          <span class="meta-label">Data Points</span>
-          <span class="info-value">{{ store.results.numPoints.toLocaleString() }}</span>
+          <span class="meta-label">Points Used</span>
+          <span class="info-value">{{ store.results.pointsUsed.toLocaleString() }}</span>
+          <span v-if="store.results.originalNumPoints > store.results.pointsUsed" class="text-muted">
+            of {{ store.results.originalNumPoints.toLocaleString() }} points (sampled)
+          </span>
         </div>
         <div class="text-center">
           <span class="meta-label">Area</span>

@@ -141,6 +141,8 @@ def test_session_init_with_file(client, fixture_csv):
     body = r.get_json()
     assert 'data_id' in body
     assert 'boundary' in body
+    assert body['original_num_points'] == 100
+    assert body['points_used'] == 100
     assert 'all_columns' in body
     assert ['X', 'Y', 'Z'] == body['all_columns']
     assert 'numeric_columns' in body
@@ -188,6 +190,21 @@ def test_session_init_isolates_same_named_uploads(app, fixture_csv, monkeypatch)
     assert os.path.dirname(first_path) != os.path.dirname(second_path)
 
 
+def test_sampling_counts_for_multiple_files(client, monkeypatch):
+    """Report the total input and the final interpolation sample for multiple files."""
+    monkeypatch.setenv('EZZONE_PROFILE', 'fast')
+    rows = ['X,Y,Z'] + [f'{x},{y},{z:.4f}' for x, y, z in zip(FIXTURE_X, FIXTURE_Y, FIXTURE_Z)] * 11
+    content = '\n'.join(rows).encode()
+    response = client.post('/api/session/init', data={
+        'file': [(io.BytesIO(content), 'first.csv'), (io.BytesIO(content), 'second.csv')],
+    }, content_type='multipart/form-data')
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body['original_num_points'] == 2200
+    assert body['num_points'] == 2000
+    assert body['points_used'] == 1000
+
+
 # ── Full pipeline ─────────────────────────────────────────────────────────────
 
 def test_pipeline(client, fixture_csv):
@@ -223,6 +240,98 @@ def test_pipeline(client, fixture_csv):
 
 # ── Export tests ──────────────────────────────────────────────────────────────
 
+def test_projected_upload_returns_wgs84_boundary_and_generates(client):
+    from pyproj import Transformer
+    from shapely.geometry import shape
+
+    x, y = Transformer.from_crs(4326, 3857, always_xy=True).transform(FIXTURE_X, FIXTURE_Y)
+    csv = 'X,Y,Yield\n' + '\n'.join(f'{a},{b},{c}' for a, b, c in zip(x, y, FIXTURE_Z))
+    response = client.post('/api/session/init', data={
+        'file': (io.BytesIO(csv.encode()), 'projected.csv'), 'crs': 'EPSG:3857',
+    }, content_type='multipart/form-data')
+    assert response.status_code == 200
+    init = response.get_json()
+    boundary = shape(init['boundary'])
+    assert -0.461 < boundary.bounds[0] < -0.449
+    assert 52.069 < boundary.bounds[1] < 52.081
+    generated = client.post('/api/zones/generate', json={
+        'data_id': init['data_id'], 'boundary_geojson': init['boundary'], 'num_classes': 3,
+    })
+    assert generated.status_code == 200
+    assert generated.get_json()['zones']['features']
+
+
+def test_multipolygon_boundary_generates_both_parts(client, app):
+    from shapely.geometry import MultiPolygon, box, mapping, shape
+
+    parts = [box(-0.460, 52.070, -0.456, 52.080), box(-0.454, 52.070, -0.450, 52.080)]
+    with Cache(app.config['CACHE_FOLDER']) as cache:
+        cache.set('multi-boundary', {'x': FIXTURE_X, 'y': FIXTURE_Y, 'z': FIXTURE_Z,
+                                    'crs': 'epsg:4326', 'z_col': 'Yield'})
+    response = client.post('/api/zones/generate', json={
+        'data_id': 'multi-boundary', 'boundary_geojson': mapping(MultiPolygon(parts)), 'num_classes': 3,
+    })
+    assert response.status_code == 200
+    geometries = [shape(f['geometry']) for f in response.get_json()['zones']['features']]
+    assert all(any(g.intersection(part).area > 0 for g in geometries) for part in parts)
+
+
+def test_boundary_outside_utm_coverage_returns_helpful_error(client, app):
+    from shapely.geometry import box, mapping
+
+    with Cache(app.config['CACHE_FOLDER']) as cache:
+        cache.set('polar-boundary', {'x': FIXTURE_X, 'y': FIXTURE_Y, 'z': FIXTURE_Z,
+                                    'crs': 'epsg:4326', 'z_col': 'Yield'})
+    response = client.post('/api/zones/generate', json={
+        'data_id': 'polar-boundary', 'boundary_geojson': mapping(box(-1, 88, 1, 89)),
+    })
+    assert response.status_code == 422
+    assert response.get_json()['code'] == 'INVALID_BOUNDARY_CRS'
+
+
+def test_large_synthetic_file_generates_and_exports_shapefile(client, tmp_path, monkeypatch):
+    """A sampled file with long value names should export both value ranges."""
+    import geopandas as gpd
+    import zipfile
+
+    monkeypatch.setenv('EZZONE_PROFILE', 'high')
+    rows = ['X,Y,MeasuredYield'] + [
+        f'{-0.460 + i * 0.0001},{52.070 + j * 0.0001},{i + j}'
+        for i in range(101) for j in range(101)
+    ]
+    response = client.post('/api/session/init', data={
+        'file': (io.BytesIO('\n'.join(rows).encode()), 'synthetic.csv'),
+    }, content_type='multipart/form-data')
+    assert response.status_code == 200, response.get_data(as_text=True)[:500]
+    upload = response.get_json()
+    assert upload['num_points'] == 10000
+    assert upload['original_num_points'] == 10201
+    assert upload['points_used'] == 10000
+    assert upload['detected_z'] == 'MeasuredYield'
+
+    response = client.post('/api/zones/generate', json={
+        'data_id': upload['data_id'], 'boundary_geojson': upload['boundary'], 'num_classes': 3,
+    })
+    assert response.status_code == 200, response.get_data(as_text=True)[:500]
+    features = response.get_json()['zones']['features']
+    assert features
+    expected = sorted((f['properties']['zone'], f['properties']['MeasuredYield_min'],
+                       f['properties']['MeasuredYield_max']) for f in features)
+
+    response = client.post('/api/export', json={'data_id': upload['data_id'], 'format': 'shapefile'})
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        assert {'zones.shp', 'zones.shx', 'zones.dbf', 'zones.prj'}.issubset(archive.namelist())
+        archive.extractall(tmp_path)
+    exported = gpd.read_file(tmp_path / 'zones.shp')
+    assert exported.crs.to_epsg() == 4326
+    fields = [c for c in exported.columns if c not in ('zone', 'geometry')]
+    assert len(fields) == 2
+    actual = sorted((int(row['zone']), *sorted(float(row[c]) for c in fields))
+                    for _, row in exported.iterrows())
+    assert actual == expected
+
+
 def test_export_geojson(client, app):
     """GeoJSON export: correct mimetype and valid JSON body."""
     # Seed diskcache with minimal result
@@ -252,6 +361,25 @@ def test_export_shapefile(client, app):
         names = zf.namelist()
     assert any(n.endswith('.shp') for n in names), f"no .shp in zip: {names}"
     assert any(n.endswith('.dbf') for n in names), f"no .dbf in zip: {names}"
+
+
+def test_export_shapefile_preserves_long_field_values(client, app, tmp_path):
+    """Long min/max property names must not collide in the DBF schema."""
+    import geopandas as gpd
+    import zipfile
+
+    feature = dict(_MINIMAL_FC['features'][0])
+    feature['properties'] = {'zone': 1, 'LongYieldColumn_min': 4.5, 'LongYieldColumn_max': 7.0}
+    with app.app_context(), Cache(app.config['CACHE_FOLDER']) as cache:
+        cache.set('zones_long-fields', {'type': 'FeatureCollection', 'features': [feature]})
+
+    response = client.post('/api/export', json={'data_id': 'long-fields', 'format': 'shapefile'})
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        archive.extractall(tmp_path)
+    exported = gpd.read_file(tmp_path / 'zones.shp')
+    values = [exported[col].iloc[0] for col in exported.columns if col not in ('zone', 'geometry')]
+    assert sorted(values) == [4.5, 7.0]
 
 
 # ── Full browser flow mock ────────────────────────────────────────────────────

@@ -123,6 +123,7 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
     # Sample based on active profile fidelity.
     profile = get_active_profile()
     max_pts = profile['max_points']
+    original_num_points = len(gdf)
     if len(gdf) > max_pts:
         saved_coords = gdf.attrs.get('_coord_cols', [])
         saved_guessed = gdf.attrs.get('is_crs_guessed', False)
@@ -130,6 +131,7 @@ def load_to_gdf(filepath: str, z_col_req: str | None = None, crs_override: str |
         # Explicitly restore metadata
         gdf.attrs['_coord_cols'] = saved_coords
         gdf.attrs['is_crs_guessed'] = saved_guessed
+    gdf.attrs['original_num_points'] = original_num_points
     
     # Identify Z column
     if z_col_req in gdf.columns:
@@ -202,6 +204,7 @@ def load_multiple_to_gdf(filepaths: list[str], z_col_req: str | None = None, crs
     combined = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=gdfs[0].crs)
     combined.attrs['is_crs_guessed'] = gdfs[0].attrs.get('is_crs_guessed', False)
     combined.attrs['_coord_cols'] = gdfs[0].attrs.get('_coord_cols', [])
+    combined.attrs['original_num_points'] = sum(gdf.attrs['original_num_points'] for gdf in gdfs)
 
     # Re-detect z col on combined
     if z_col_req in combined.columns:

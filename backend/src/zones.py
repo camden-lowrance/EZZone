@@ -46,9 +46,9 @@ def get_metadata(
     in_projection: str = 'epsg:4326',
     boundary_geojson: str | dict | None = None
 ) -> dict:
-    """Fast metadata extraction (boundary and stats) without heavy processing."""
+    """Return a WGS84 boundary and point count without heavy processing."""
     if boundary_geojson is None:
-        boundary = bound_json(x, y, in_projection=in_projection, out_projection=in_projection)
+        boundary = bound_json(x, y, in_projection=in_projection, out_projection='epsg:4326')
     else:
         boundary = json.loads(boundary_geojson) if isinstance(boundary_geojson, str) else boundary_geojson
 
@@ -68,7 +68,7 @@ def generate_zones(
     z_col: str = 'value',
 ) -> dict[str, Any]:
     """
-    Generate agricultural management zones from point data.
+    Generate zones from point data; boundary GeoJSON is always WGS84.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -76,22 +76,22 @@ def generate_zones(
 
     # Create or use boundary (always irregular/convex hull now)
     if boundary_geojson is None:
-        boundary = bound_json(x, y, in_projection=in_projection, out_projection=in_projection)
+        boundary = bound_json(x, y, in_projection=in_projection, out_projection='epsg:4326')
     else:
         boundary = json.loads(boundary_geojson) if isinstance(boundary_geojson, str) else boundary_geojson
 
     boundary_geom = _extract_geometry(boundary)
 
-    # Reproject boundary to WGS84 and determine UTM zone
-    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection='epsg:4326') 
+    # API and map boundaries are WGS84, independent of the uploaded points' CRS.
+    boundary_wgs84 = reproject_poly(shape(boundary_geom), in_projection='epsg:4326', out_projection='epsg:4326')
     utm_crs = utmzone(boundary_wgs84)
-    boundary_utm = reproject_poly(shape(boundary_geom), in_projection=in_projection, out_projection=utm_crs)       
+    boundary_utm = reproject_poly(boundary_wgs84, in_projection='epsg:4326', out_projection=utm_crs)
 
     # Interpolate point data to raster
     array, raster_bounds = interpolate_raster(x, y, z, in_projection, utm_crs, boundary_utm)
 
     # Compute GVF for 2-8 classes based on sampled pixel values (to speed up "elbow" detection)
-    flat_values = array.flatten()
+    flat_values = array.ravel()
     valid_values = flat_values[~np.isnan(flat_values)]
     
     # Sample based on active profile
@@ -103,6 +103,8 @@ def generate_zones(
         sampled_values = valid_values
     
     gvf_arr = gvf_array(sampled_values, 8)
+    # Release the full-raster sample before classification allocates its arrays.
+    del flat_values, valid_values, sampled_values
 
     # Classify raster pixels and polygonize
     classified, class_breaks, class_ranges = classify_raster(array, num_classes)
@@ -138,9 +140,10 @@ def export_zones(
         return json.dumps(zones_geojson)
     elif format == 'shapefile':
         gdf = gpd.GeoDataFrame.from_features(zones_geojson['features'], crs='epsg:4326')
-        gdf.columns = [c[:10] if len(c) > 10 else c for c in gdf.columns]
         with tempfile.TemporaryDirectory() as tmpdir:
             outpath = f"{tmpdir}/zones.shp"
+            # Let the Shapefile driver shorten and disambiguate DBF field names.
+            # Truncating first can make the min and max columns identical.
             gdf.to_file(outpath)
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:

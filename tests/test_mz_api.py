@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from src.zones import generate_zones, export_zones
+from src.geo import classify_raster, interpolate_raster
 
 
 # ── Test data ──────────────────────────────────────────────────────────────────
@@ -25,6 +26,45 @@ FIXTURE_Z = _Z_GRID.flatten()
 
 
 # ── Basic tests ────────────────────────────────────────────────────────────────
+
+def test_interpolation_matches_dense_grid_with_nearest_fallback(monkeypatch):
+    """Broadcast grid coordinates must match dense coordinates, including fallback."""
+    from rasterio import features
+    from rasterio.transform import from_bounds
+    from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+    from shapely.geometry import Polygon
+
+    monkeypatch.setenv('EZZONE_PROFILE', 'fast')
+    x = np.array([0., 8., 0., 8., 4.])
+    y = np.array([0., 0., 8., 8., 4.])
+    z = np.array([3., 5., 7., 10., 6.])
+    poly = Polygon([(-1, -1), (9, -1), (9, 9), (-1, 9)])
+    result, bounds = interpolate_raster(x, y, z, 'epsg:32617', 'epsg:32617', poly)
+    ny, nx = result.shape
+    gridx, gridy = np.meshgrid(np.linspace(bounds[0], bounds[2], nx),
+                               np.linspace(bounds[1], bounds[3], ny))
+    points = np.column_stack([x, y])
+    expected = LinearNDInterpolator(points, z)(gridx, gridy)
+    missing = np.isnan(expected)
+    assert missing.any()
+    expected[missing] = NearestNDInterpolator(points, z)(gridx[missing], gridy[missing])
+    mask = features.geometry_mask([poly], out_shape=(ny, nx), transform=from_bounds(*bounds, nx, ny), invert=True)
+    expected[~np.flipud(mask)] = np.nan
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_classification_orders_zones_by_value():
+    """Class numbers and reported ranges should increase with raster values."""
+    raster = np.tile(np.repeat([30.0, 10.0, 20.0], 8), (12, 1))
+    classified, breaks, ranges = classify_raster(raster, 3)
+
+    assert classified.shape == raster.shape
+    assert classified[5, 3] == 3
+    assert classified[5, 11] == 1
+    assert classified[5, 20] == 2
+    assert len(breaks) == 3
+    assert [r[0] for r in ranges] == [10.0, 20.0, 30.0]
+
 
 def test_generate_zones_basic():
     """Test basic zone generation with 3 classes."""
